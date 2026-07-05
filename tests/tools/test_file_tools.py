@@ -166,6 +166,40 @@ class TestWriteFileHandler:
         assert "error" in result
         assert "string" in result["error"].lower() or "content" in result["error"].lower()
 
+    @patch("tools.file_tools._get_file_ops")
+    def test_allows_task_scoped_write_inside_governed_workspace(self, mock_get, monkeypatch, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "t_exec")
+        monkeypatch.setenv("HERMES_KANBAN_WORKSPACE", str(workspace))
+        monkeypatch.setenv("TERMINAL_CWD", str(workspace))
+        monkeypatch.setattr("tools.file_tools._check_sensitive_path", lambda *_args, **_kwargs: None)
+
+        mock_ops = MagicMock()
+        result_obj = MagicMock()
+        result_obj.to_dict.return_value = {"status": "ok", "path": str(workspace / "inside.txt")}
+        mock_ops.write_file.return_value = result_obj
+        mock_get.return_value = mock_ops
+
+        from tools.file_tools import write_file_tool
+        result = json.loads(write_file_tool("inside.txt", "ok", task_id="t_exec"))
+        assert result["status"] == "ok"
+        mock_ops.write_file.assert_called_once_with("inside.txt", "ok")
+
+    @patch("tools.file_tools._get_file_ops")
+    def test_blocks_task_scoped_write_outside_governed_workspace(self, mock_get, monkeypatch, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "t_exec")
+        monkeypatch.setenv("HERMES_KANBAN_WORKSPACE", str(workspace))
+        monkeypatch.setenv("TERMINAL_CWD", str(workspace))
+        monkeypatch.setattr("tools.file_tools._check_sensitive_path", lambda *_args, **_kwargs: None)
+
+        from tools.file_tools import write_file_tool
+        result = json.loads(write_file_tool(str(tmp_path / "outside.txt"), "nope", task_id="t_exec"))
+        assert "outside the governed kanban workspace" in result["error"]
+        mock_get.assert_not_called()
+
 
 class TestPatchHandler:
     @patch("tools.file_tools._get_file_ops")
@@ -273,6 +307,28 @@ class TestPatchHandler:
         ))
         assert "error" in result
         assert "traversal" in result["error"].lower()
+
+    @patch("tools.file_tools._get_file_ops")
+    def test_blocks_task_scoped_patch_outside_governed_workspace(self, mock_get, monkeypatch, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "t_exec")
+        monkeypatch.setenv("HERMES_KANBAN_WORKSPACE", str(workspace))
+        monkeypatch.setenv("TERMINAL_CWD", str(workspace))
+        monkeypatch.setattr("tools.file_tools._check_sensitive_path", lambda *_args, **_kwargs: None)
+
+        from tools.file_tools import patch_tool
+        result = json.loads(
+            patch_tool(
+                mode="replace",
+                path=str(tmp_path / "outside.py"),
+                old_string="foo",
+                new_string="bar",
+                task_id="t_exec",
+            )
+        )
+        assert "outside the governed kanban workspace" in result["error"]
+        mock_get.assert_not_called()
 
 
 class TestSearchHandler:
@@ -422,7 +478,6 @@ class TestSearchHints:
         raw = search_tool(pattern="foo", offset=50, limit=50)
         assert "[Hint:" in raw
         assert "offset=100" in raw
-
 
 # ---------------------------------------------------------------------------
 # PATCH_SCHEMA shape tests (issue #15524)

@@ -518,6 +518,42 @@ def _check_cross_profile_path(filepath: str, task_id: str = "default") -> str | 
     )
 
 
+def _get_kanban_workspace_root() -> Path | None:
+    """Return the governed kanban workspace root for task-scoped workers."""
+    if not os.environ.get("HERMES_KANBAN_TASK"):
+        return None
+    workspace = os.environ.get("HERMES_KANBAN_WORKSPACE")
+    if not workspace:
+        return None
+    try:
+        return Path(workspace).expanduser().resolve()
+    except (OSError, ValueError):
+        return None
+
+
+def _check_kanban_workspace_write_path(filepath: str, task_id: str = "default") -> str | None:
+    """Reject task-scoped writes outside the governed kanban workspace."""
+    workspace_root = _get_kanban_workspace_root()
+    if workspace_root is None:
+        return None
+    try:
+        resolved = _resolve_path_for_task(filepath, task_id)
+    except (OSError, ValueError):
+        return (
+            f"Blocked: could not resolve write path {filepath!r} inside the governed "
+            "kanban workspace. Use files under $HERMES_KANBAN_WORKSPACE or block the task instead."
+        )
+    try:
+        resolved.relative_to(workspace_root)
+    except ValueError:
+        return (
+            f"Blocked: write path {resolved} is outside the governed kanban workspace "
+            f"{workspace_root}. Write only inside $HERMES_KANBAN_WORKSPACE or block the task instead."
+        )
+    return None
+
+
+
 def _is_expected_write_exception(exc: Exception) -> bool:
     """Return True for expected write denials that should not hit error logs."""
     if isinstance(exc, PermissionError):
@@ -1283,6 +1319,10 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
         cross_warning = _check_cross_profile_path(path, task_id)
         if cross_warning:
             return tool_error(cross_warning)
+    workspace_err = _check_kanban_workspace_write_path(path, task_id)
+    if workspace_err:
+        return tool_error(workspace_err)
+
     if _is_internal_file_tool_content(content):
         return tool_error(
             "Refusing to write internal read_file display text as file content. "
@@ -1386,6 +1426,10 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
             cross_warning = _check_cross_profile_path(_p, task_id)
             if cross_warning:
                 return tool_error(cross_warning)
+        workspace_err = _check_kanban_workspace_write_path(_p, task_id)
+        if workspace_err:
+            return tool_error(workspace_err)
+
     try:
         # Resolve paths for locking.  Ordered + deduplicated so concurrent
         # callers lock in the same order — prevents deadlock on overlapping

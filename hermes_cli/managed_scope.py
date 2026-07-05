@@ -20,6 +20,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Dict, Optional
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 # POSIX default. Other-platform locations are a deliberate v2 item; when added,
 # they belong ONLY inside get_managed_dir().
 _DEFAULT_MANAGED_DIR = Path("/etc/hermes")
+_DARWIN_MANAGED_DIR = Path.home() / ".hermes" / "managed"
 
 _CACHE_LOCK = threading.Lock()
 # path_key -> (mtime_ns, size, parsed)
@@ -58,6 +60,9 @@ def get_managed_dir() -> Optional[Path]:
          AND the directory exists.
       2. ``/etc/hermes`` — POSIX default, when it exists. Ignored under pytest so
          a real system managed scope can't leak into the test suite.
+      3. ``~/.hermes/managed`` on macOS, when it exists. This gives local
+         single-user installs a machine-global layer without requiring ``/etc``
+         provisioning or per-profile secret duplication.
 
     A non-existent directory at either tier resolves to None (no managed scope),
     which is the common case and must be cheap + side-effect-free.
@@ -68,7 +73,11 @@ def get_managed_dir() -> Optional[Path]:
         return p if p.is_dir() else None
     if _under_pytest():
         return None
-    return _DEFAULT_MANAGED_DIR if _DEFAULT_MANAGED_DIR.is_dir() else None
+    if _DEFAULT_MANAGED_DIR.is_dir():
+        return _DEFAULT_MANAGED_DIR
+    if sys.platform == "darwin" and _DARWIN_MANAGED_DIR.is_dir():
+        return _DARWIN_MANAGED_DIR
+    return None
 
 
 def invalidate_managed_cache() -> None:

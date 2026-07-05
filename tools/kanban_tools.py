@@ -31,6 +31,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
+from fnmatch import fnmatchcase
+from pathlib import Path
 from typing import Any, Optional
 
 from agent.redact import redact_sensitive_text
@@ -129,6 +132,252 @@ def _stamp_worker_session_metadata(
     stamped = dict(metadata or {})
     stamped["worker_session_id"] = session_id
     return stamped
+def _split_git_output(stdout: str) -> list[str]:
+    return [line.strip() for line in stdout.splitlines() if line.strip()]
+
+
+def _parse_authorized_files(body: str) -> list[str]:
+    lines = body.splitlines()
+    authorized: list[str] = []
+    collecting = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "Authorized Files:":
+            collecting = True
+            continue
+        if collecting:
+            if stripped.startswith("- "):
+                authorized.append(stripped[2:].strip())
+                continue
+            if stripped:
+                break
+    return authorized
+
+
+def _normalize_repo_relative_path(value: str) -> str:
+    normalized = value.strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _derive_canonical_prefix(raw: dict[str, Any], workspace_root: Path) -> str | None:
+    canonical_prefix = raw.get("canonicalPrefix")
+    if isinstance(canonical_prefix, str) and canonical_prefix.strip():
+        return _normalize_repo_relative_path(canonical_prefix)
+
+    if (workspace_root / "apps" / "mission-control").is_dir():
+        return "apps/mission-control"
+
+    source_repo_path = raw.get("sourceRepoPath")
+    workspace_path = raw.get("workspacePath")
+    if not isinstance(source_repo_path, str) or not source_repo_path.strip():
+        return None
+    if not isinstance(workspace_path, str) or not workspace_path.strip():
+        return None
+
+    source_repo = Path(source_repo_path).expanduser().resolve()
+    workspace = Path(workspace_path).expanduser().resolve()
+    try:
+        relative_parts = workspace.relative_to(source_repo).parts
+    except ValueError:
+        return None
+
+    if not relative_parts:
+        return None
+    if relative_parts[0] == "apps" and len(relative_parts) >= 2:
+        return "/".join(relative_parts[:2])
+
+    return relative_parts[0]
+
+
+def _canonicalize_mc_scope_path(value: str, canonical_prefix: str) -> str:
+    normalized = _normalize_repo_relative_path(value)
+    if not normalized:
+        return ""
+    canonical_prefix = _normalize_repo_relative_path(canonical_prefix)
+    canonical_prefix_with_slash = f"{canonical_prefix}/"
+    embedded_index = normalized.rfind(canonical_prefix_with_slash)
+    if embedded_index >= 0:
+        return normalized[embedded_index:]
+    if normalized == canonical_prefix or normalized.startswith(canonical_prefix_with_slash):
+        return normalized
+    if normalized.startswith("apps/"):
+        return normalized
+    return f"{canonical_prefix}/{normalized}"
+
+
+def _scope_entry_has_wildcard(value: str) -> bool:
+    return any(token in value for token in ("*", "?", "["))
+
+
+def _matches_authorized_scope_path(changed_path: str, scope_entry: str) -> bool:
+    if not scope_entry:
+        return False
+    if not _scope_entry_has_wildcard(scope_entry):
+        return changed_path == scope_entry
+
+    if scope_entry.endswith("/**"):
+        prefix = scope_entry[:-3].rstrip("/")
+        return changed_path == prefix or changed_path.startswith(f"{prefix}/")
+
+    return fnmatchcase(changed_path, scope_entry)
+
+
+def _is_mc_changed_file_authorized(changed_path: str, authorized_files: set[str]) -> bool:
+    return any(_matches_authorized_scope_path(changed_path, scope_entry) for scope_entry in authorized_files)
+
+
+def _load_mc_attempt_workspace_metadata(workspace_root: Path) -> tuple[str, str]:
+    stem = workspace_root.name
+    worktree_parent = workspace_root.parent
+    metadata_dir = worktree_parent.parent / ".mc-attempt-metadata"
+    metadata_path = metadata_dir / f"{stem}.json"
+    try:
+        raw = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(
+            f"attempt workspace metadata could not be loaded from {metadata_path}: {exc}"
+        ) from exc
+
+    base_commit_sha = raw.get("baseCommitSha")
+    if not isinstance(base_commit_sha, str) or not base_commit_sha.strip():
+        base_commit_sha = raw.get("baseSha")
+    canonical_prefix = _derive_canonical_prefix(raw, workspace_root)
+    if not isinstance(base_commit_sha, str) or not base_commit_sha.strip():
+        raise RuntimeError(f"attempt workspace metadata at {metadata_path} is missing baseCommitSha")
+    if not isinstance(canonical_prefix, str) or not canonical_prefix.strip():
+        raise RuntimeError(f"attempt workspace metadata at {metadata_path} is missing canonicalPrefix")
+    return base_commit_sha.strip(), _normalize_repo_relative_path(canonical_prefix)
+
+
+def _governed_workspace_changed_files(workspace_root: Path, base_commit_sha: str) -> list[str]:
+    tracked = subprocess.run(
+        ["git", "diff", "--name-only", base_commit_sha, "--"],
+        cwd=str(workspace_root),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    tracked_created = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=A", base_commit_sha, "--"],
+        cwd=str(workspace_root),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=str(workspace_root),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    changed = {
+        _normalize_repo_relative_path(value)
+        for value in [
+            *_split_git_output(tracked.stdout),
+            *_split_git_output(tracked_created.stdout),
+            *_split_git_output(untracked.stdout),
+        ]
+        if _normalize_repo_relative_path(value)
+    }
+    return sorted(changed)
+
+
+def _validate_mc_execute_workspace_scope(body: str) -> str | None:
+    workspace_raw = os.environ.get("HERMES_KANBAN_WORKSPACE")
+    if not workspace_raw:
+        return (
+            "Mission Control execute tasks require HERMES_KANBAN_WORKSPACE so the "
+            "governed worktree can be validated. Block the task instead."
+        )
+    try:
+        workspace_root = Path(workspace_raw).expanduser().resolve()
+    except (OSError, ValueError):
+        return (
+            "Mission Control execute task workspace could not be resolved. "
+            "Block the task instead."
+        )
+    try:
+        base_commit_sha, canonical_prefix = _load_mc_attempt_workspace_metadata(workspace_root)
+        changed_files = _governed_workspace_changed_files(workspace_root, base_commit_sha)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        return (
+            "Mission Control execute task workspace validation failed: "
+            f"{stderr or exc}. Clean up the governed worktree or block the task instead."
+        )
+    except Exception as exc:
+        return (
+            "Mission Control execute task workspace validation failed: "
+            f"{exc}. Clean up the governed worktree or block the task instead."
+        )
+
+    if not changed_files:
+        return (
+            "Mission Control execute tasks must leave changed files in the governed "
+            "worktree since the attempt baseline before completion. No changed files were found under "
+            "$HERMES_KANBAN_WORKSPACE. Apply the change there or block the task instead."
+        )
+
+    authorized_files = {
+        _canonicalize_mc_scope_path(value, canonical_prefix)
+        for value in _parse_authorized_files(body)
+    }
+    if not authorized_files:
+        return (
+            "Mission Control execute task scope could not be validated because the card "
+            "body does not declare Authorized Files. Clean up or block the task instead."
+        )
+
+    out_of_prefix = [
+        value
+        for value in changed_files
+        if value != canonical_prefix and not value.startswith(f"{canonical_prefix}/")
+    ]
+    if out_of_prefix:
+        return (
+            "Mission Control execute task has out-of-scope file drift outside the canonical prefix "
+            f"{canonical_prefix}: {', '.join(out_of_prefix)}. Clean up those files or block the task instead."
+        )
+
+    out_of_scope = [
+        value for value in changed_files
+        if not _is_mc_changed_file_authorized(value, authorized_files)
+    ]
+    if out_of_scope:
+        return (
+            "Mission Control execute task has out-of-scope file drift in the governed "
+            f"worktree: {', '.join(out_of_scope)}. Clean up those files or block the task instead."
+        )
+    return None
+    raw = os.environ.get("HERMES_KANBAN_RUN_ID")
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def _check_expected_worker_run(kb, conn, task_id: str) -> str | None:
+    """Reject stale worker run tokens before mutating task state."""
+    expected_run_id = _worker_run_id(task_id)
+    if expected_run_id is None:
+        return None
+    active = kb.latest_run(conn, task_id)
+    active_id = getattr(active, "id", None)
+    if active_id != expected_run_id:
+        return (
+            f"worker run token is stale for task {task_id}: expected active run "
+            f"{active_id}, got {expected_run_id}. Refresh the worker context or block the task instead."
+        )
+    return None
+
 
 
 def _enforce_worker_task_ownership(tid: str) -> Optional[str]:
@@ -332,6 +581,61 @@ def _task_summary_dict(kb, conn, task) -> dict[str, Any]:
         "parent_count": len(parents),
         "child_count": len(children),
     }
+
+
+def _read_enabled_toolsets_from_env() -> list[str]:
+    raw = os.environ.get("HERMES_KANBAN_ENABLED_TOOLSETS", "").strip()
+    if not raw:
+        return []
+    return [toolset.strip() for toolset in raw.split(",") if toolset.strip()]
+
+
+def _read_tool_audit_file() -> dict[str, Any]:
+    audit_path = os.environ.get("HERMES_KANBAN_TOOL_AUDIT_PATH", "").strip()
+    if not audit_path:
+        return {}
+    try:
+        with open(audit_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return payload if isinstance(payload, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logger.debug("Failed to read kanban tool audit file %s", audit_path, exc_info=True)
+        return {}
+
+
+def _build_tool_audit_metadata() -> dict[str, Any]:
+    enabled_toolsets = _read_enabled_toolsets_from_env()
+    audit_file_payload = _read_tool_audit_file()
+    raw_tools_used = audit_file_payload.get("tools_used")
+    tools_used = [str(tool).strip() for tool in raw_tools_used if str(tool).strip()] if isinstance(raw_tools_used, list) else []
+    if not enabled_toolsets and not tools_used:
+        return {}
+    forbidden_tools_used: list[str] = []
+    if enabled_toolsets:
+        allowed_toolsets = set(enabled_toolsets)
+        for tool_name in tools_used:
+            toolset = registry.get_toolset_for_tool(tool_name)
+            if toolset and toolset not in allowed_toolsets and tool_name not in forbidden_tools_used:
+                forbidden_tools_used.append(tool_name)
+    return {
+        "toolAudit": {
+            "enabledToolsets": enabled_toolsets,
+            "toolsUsed": tools_used,
+            "forbiddenToolViolation": bool(forbidden_tools_used),
+            "forbiddenToolsUsed": forbidden_tools_used,
+        }
+    }
+
+
+def _merge_metadata_with_tool_audit(metadata: Optional[dict[str, Any]]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    if isinstance(metadata, dict):
+        merged.update(metadata)
+    merged.update(_build_tool_audit_metadata())
+    return merged
+
 
 
 # ---------------------------------------------------------------------------
@@ -566,10 +870,72 @@ def _handle_complete(args: dict, **kw) -> str:
     try:
         kb, conn = _connect(board=board)
         try:
+            row = conn.execute(
+                "SELECT assignee, body FROM tasks WHERE id = ?",
+                (tid,),
+            ).fetchone()
+            stale_run_error = _check_expected_worker_run(kb, conn, tid)
+            if stale_run_error:
+                return tool_error(stale_run_error)
+            assignee = str(row["assignee"] or "").strip().lower() if row else ""
+            body = str(row["body"] or "") if row else ""
+            is_bernard_review = assignee == "bernard" and "Task Type: review" in body
+            is_mc_execute = "Task Type: execution" in body and "MC Task ID:" in body
+            if is_bernard_review:
+                if not isinstance(result, str) or not result.strip():
+                    return tool_error(
+                        "Bernard review tasks must complete with "
+                        "result=<raw review_decision JSON>. "
+                        "Do not complete with summary only."
+                    )
+                try:
+                    parsed = json.loads(result)
+                except Exception:
+                    return tool_error(
+                        "Bernard review tasks must provide valid JSON in "
+                        "result. Expected a review_decision payload."
+                    )
+                if not isinstance(parsed, dict) or parsed.get("kind") != "review_decision":
+                    return tool_error(
+                        "Bernard review task result must be a JSON object "
+                        "with kind='review_decision'."
+                    )
+                if parsed.get("decision") not in {"approve", "reject"}:
+                    return tool_error(
+                        "Bernard review task result.decision must be "
+                        "'approve' or 'reject'."
+                    )
+            if is_mc_execute:
+                if not isinstance(result, str) or not result.strip():
+                    return tool_error(
+                        "Mission Control execute tasks must complete with "
+                        "result=<raw execution_result JSON>. "
+                        "Do not complete with summary only; resubmit with "
+                        "kind='execution_result' or block the task instead."
+                    )
+                try:
+                    parsed = json.loads(result)
+                except Exception:
+                    return tool_error(
+                        "Mission Control execute tasks must provide valid "
+                        "JSON in result. Expected an execution_result payload."
+                    )
+                if not isinstance(parsed, dict) or parsed.get("kind") != "execution_result":
+                    return tool_error(
+                        "Mission Control execute task result must be a JSON "
+                        "object with kind='execution_result'. Resubmit with "
+                        "raw execution_result JSON or block the task instead."
+                    )
+                workspace_scope_error = _validate_mc_execute_workspace_scope(body)
+                if workspace_scope_error:
+                    return tool_error(workspace_scope_error)
+
             try:
                 ok = kb.complete_task(
                     conn, tid,
-                    result=result, summary=summary, metadata=metadata,
+                    result=result,
+                    summary=summary,
+                    metadata=_merge_metadata_with_tool_audit(metadata),
                     created_cards=created_cards,
                     expected_run_id=_worker_run_id(tid),
                 )
@@ -619,16 +985,23 @@ def _handle_block(args: dict, **kw) -> str:
     if ownership_err:
         return ownership_err
     reason = args.get("reason")
+    metadata = args.get("metadata")
     if not reason or not str(reason).strip():
         return tool_error("reason is required — explain what input you need")
     reason = redact_sensitive_text(str(reason), force=True)
     board = args.get("board")
+    if metadata is not None and not isinstance(metadata, dict):
+        return tool_error(
+            f"metadata must be an object/dict, got {type(metadata).__name__}"
+        )
+
     try:
         kb, conn = _connect(board=board)
         try:
             ok = kb.block_task(
                 conn, tid,
                 reason=reason,
+                metadata=_merge_metadata_with_tool_audit(metadata),
                 expected_run_id=_worker_run_id(tid),
             )
             if not ok:
@@ -777,6 +1150,7 @@ def _handle_create(args: dict, **kw) -> str:
     max_runtime_seconds = args.get("max_runtime_seconds")
     initial_status = args.get("initial_status") or "running"
     skills = args.get("skills")
+    enabled_toolsets = args.get("enabled_toolsets")
     if isinstance(skills, str):
         # Accept a single skill name as a string for convenience.
         skills = [skills]
@@ -788,6 +1162,13 @@ def _handle_create(args: dict, **kw) -> str:
     if goal_bool_error:
         return tool_error(goal_bool_error)
     goal_max_turns = args.get("goal_max_turns")
+    if isinstance(enabled_toolsets, str):
+        enabled_toolsets = [enabled_toolsets]
+    if enabled_toolsets is not None and not isinstance(enabled_toolsets, (list, tuple)):
+        return tool_error(
+            f"enabled_toolsets must be a list of toolset names, got {type(enabled_toolsets).__name__}"
+        )
+
     if isinstance(parents, str):
         parents = [parents]
     if not isinstance(parents, (list, tuple)):
@@ -829,6 +1210,8 @@ def _handle_create(args: dict, **kw) -> str:
                     int(goal_max_turns) if goal_max_turns is not None else None
                 ),
                 initial_status=str(initial_status),
+                enabled_toolsets=enabled_toolsets,
+
                 created_by=os.environ.get("HERMES_PROFILE") or "worker",
                 session_id=session_id,
             )
@@ -1139,6 +1522,14 @@ KANBAN_COMPLETE_SCHEMA = {
                     "task.result). Use ``summary`` instead when "
                     "possible; this exists for compatibility with "
                     "callers that still set --result on the CLI."
+                    "Structured completion payload stored in "
+                    "``task.result``. Optional for normal worker tasks; "
+                    "required for Bernard review tasks, where it must be "
+                    "the raw JSON ``review_decision`` object consumed by "
+                    "Mission Control reverse sync, and required for "
+                    "Mission Control execute tasks, where it must be the "
+                    "raw JSON ``execution_result`` object."
+
                 ),
             },
             "created_cards": {
@@ -1207,6 +1598,14 @@ KANBAN_BLOCK_SCHEMA = {
                 ),
             },
             "board": _board_schema_prop(),
+            "metadata": {
+                "type": "object",
+                "description": (
+                    "Optional structured facts about the blocker. "
+                    "Tool-audit metadata is merged automatically."
+                ),
+            },
+
         },
         "required": ["reason"],
     },
@@ -1414,6 +1813,16 @@ KANBAN_CREATE_SCHEMA = {
                 ),
             },
             "board": _board_schema_prop(),
+            "enabled_toolsets": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Optional task-specific toolset restriction for the "
+                    "dispatched worker. When present, it overrides the "
+                    "broader profile default for this task."
+                ),
+            },
+
         },
         "required": ["title", "assignee"],
     },

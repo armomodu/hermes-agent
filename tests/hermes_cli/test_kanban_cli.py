@@ -167,6 +167,13 @@ def test_run_slash_json_output(kanban_home):
     assert payload["status"] == "ready"
 
 
+def test_run_slash_json_output_includes_enabled_toolsets(kanban_home):
+    out = kc.run_slash("create 'restricted' --assignee bernard --toolset kanban --toolset file --json")
+    payload = json.loads(out)
+    assert payload["title"] == "restricted"
+    assert payload["enabled_toolsets"] == ["kanban", "file"]
+
+
 def test_run_slash_dispatch_dry_run_counts(kanban_home):
     kc.run_slash("create 'a' --assignee alice")
     kc.run_slash("create 'b' --assignee bob")

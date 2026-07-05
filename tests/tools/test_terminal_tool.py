@@ -1,5 +1,7 @@
 """Regression tests for sudo detection and sudo password handling."""
 
+import json
+
 import tools.terminal_tool as terminal_tool
 
 
@@ -243,3 +245,89 @@ def test_get_env_config_still_rejects_bad_docker_json_for_docker_backend(monkeyp
         assert "TERMINAL_DOCKER_VOLUMES" in str(exc)
     else:
         raise AssertionError("Docker backend must validate TERMINAL_DOCKER_VOLUMES")
+
+
+def test_enforce_kanban_workspace_command_scope_allows_in_workspace_cd(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    nested = workspace / "nested"
+    nested.mkdir(parents=True)
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_exec")
+    monkeypatch.setenv("HERMES_KANBAN_WORKSPACE", str(workspace))
+
+    error, workdir = terminal_tool._enforce_kanban_workspace_command_scope(
+        command="cd nested && pwd",
+        workdir=None,
+        cwd=str(workspace),
+    )
+
+    assert error is None
+    assert workdir is None
+
+
+def test_enforce_kanban_workspace_command_scope_blocks_outside_workdir(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_exec")
+    monkeypatch.setenv("HERMES_KANBAN_WORKSPACE", str(workspace))
+
+    error, workdir = terminal_tool._enforce_kanban_workspace_command_scope(
+        command="pwd",
+        workdir=str(tmp_path),
+        cwd=str(workspace),
+    )
+
+    assert "outside the governed kanban workspace" in error
+    assert workdir is None
+
+
+def test_enforce_kanban_workspace_command_scope_blocks_explicit_cd_outside_workspace(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_exec")
+    monkeypatch.setenv("HERMES_KANBAN_WORKSPACE", str(workspace))
+
+    error, workdir = terminal_tool._enforce_kanban_workspace_command_scope(
+        command=f"cd {tmp_path} && touch nope.txt",
+        workdir=None,
+        cwd=str(workspace),
+    )
+
+    assert "cd target" in error
+    assert "governed kanban workspace" in error
+    assert workdir is None
+
+
+def test_terminal_tool_blocks_task_scoped_workdir_outside_workspace(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_exec")
+    monkeypatch.setenv("HERMES_KANBAN_WORKSPACE", str(workspace))
+
+    fake_env = object()
+    monkeypatch.setattr(terminal_tool, "_get_env_config", lambda: {
+        "env_type": "local",
+        "docker_image": "",
+        "singularity_image": "",
+        "modal_image": "",
+        "daytona_image": "",
+        "cwd": str(workspace),
+        "timeout": 30,
+        "local_persistent": False,
+        "host_cwd": None,
+    })
+    monkeypatch.setattr(terminal_tool, "_check_all_guards", lambda *_args, **_kwargs: {"approved": True})
+    monkeypatch.setattr(terminal_tool, "_start_cleanup_thread", lambda: None)
+    monkeypatch.setattr(terminal_tool, "_create_environment", lambda **_kwargs: fake_env)
+    monkeypatch.setattr(terminal_tool, "_active_environments", {})
+    monkeypatch.setattr(terminal_tool, "_creation_locks", {})
+
+    result = json.loads(
+        terminal_tool.terminal_tool(
+            command="pwd",
+            task_id="t_exec",
+            workdir=str(tmp_path),
+        )
+    )
+
+    assert result["status"] == "blocked"
+    assert "outside the governed kanban workspace" in result["error"]

@@ -79,6 +79,7 @@ def _task_to_dict(t: kb.Task) -> dict[str, Any]:
         "session_id": t.session_id,
         "workflow_template_id": t.workflow_template_id,
         "current_step_key": t.current_step_key,
+        "enabled_toolsets": list(t.enabled_toolsets) if t.enabled_toolsets else [],
     }
 
 
@@ -361,6 +362,9 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
                           help="Initial card status. Use 'blocked' for cards "
                                "that require immediate human ops (R3 gate) "
                                "to skip the brief running-to-blocked transition.")
+    p_create.add_argument("--toolset", action="append", default=[], dest="enabled_toolsets",
+                          help="Restrict the worker to these toolsets "
+                               "(repeatable). Example: --toolset kanban --toolset file")
     p_create.add_argument("--json", action="store_true", help="Emit JSON output")
 
     # --- swarm ---
@@ -1331,6 +1335,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             goal_mode=bool(getattr(args, "goal_mode", False)),
             goal_max_turns=getattr(args, "goal_max_turns", None),
             initial_status=getattr(args, "initial_status", "running"),
+            enabled_toolsets=getattr(args, "enabled_toolsets", None) or None,
         )
         task = kb.get_task(conn, task_id)
     if getattr(args, "json", False):

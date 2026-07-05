@@ -89,6 +89,42 @@ def test_no_idempotency_key_never_collides(kanban_home):
         conn.close()
 
 
+def test_default_spawn_passes_task_enabled_toolsets(kanban_home, monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    class _FakeProc:
+        pid = 4242
+
+    def _fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = kwargs.get("env", {})
+        return _FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(
+            conn,
+            title="restricted decompose",
+            assignee="bernard",
+            enabled_toolsets=["kanban", "file"],
+        )
+        kb.claim_task(conn, tid)
+        task = kb.get_task(conn, tid)
+        workspace = str(tmp_path / "workspace")
+        Path(workspace).mkdir(parents=True, exist_ok=True)
+        pid = kb._default_spawn(task, workspace)
+    finally:
+        conn.close()
+
+    assert pid == 4242
+    assert "--toolsets" in captured["cmd"]
+    toolsets_index = captured["cmd"].index("--toolsets")
+    assert captured["cmd"][toolsets_index + 1] == "kanban,file"
+    assert captured["env"]["HERMES_KANBAN_ENABLED_TOOLSETS"] == "kanban,file"
+
+
 # ---------------------------------------------------------------------------
 # Spawn-failure circuit breaker
 # ---------------------------------------------------------------------------

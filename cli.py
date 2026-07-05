@@ -5752,6 +5752,170 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         except Exception:
             pass
 
+    def _init_agent(self, *, model_override: str = None, runtime_override: dict = None, request_overrides: dict | None = None) -> bool:
+        """
+        Initialize the agent on first use.
+        When resuming a session, restores conversation history from SQLite.
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if self.agent is not None:
+            return True
+
+        if not self._ensure_runtime_credentials():
+            return False
+
+        # Initialize SQLite session store for CLI sessions (if not already done in __init__)
+        if self._session_db is None:
+            try:
+                from hermes_state import SessionDB
+                self._session_db = SessionDB()
+            except Exception as e:
+                logger.warning("SQLite session store not available — session will NOT be indexed: %s", e)
+        
+        # If resuming, validate the session exists and load its history.
+        # _preload_resumed_session() may have already loaded it (called from
+        # run() for immediate display).  In that case, conversation_history
+        # is non-empty and we skip the DB round-trip.
+        if self._resumed and self._session_db and not self.conversation_history:
+            session_meta = self._session_db.get_session(self.session_id)
+            if not session_meta:
+                _cprint(f"\033[1;31mSession not found: {self.session_id}{_RST}")
+                _cprint(f"{_DIM}Use a session ID from a previous CLI run (hermes sessions list).{_RST}")
+                return False
+            # If the requested session is the (empty) head of a compression
+            # chain, walk to the descendant that actually holds the messages.
+            # See #15000 and SessionDB.resolve_resume_session_id.
+            try:
+                resolved_id = self._session_db.resolve_resume_session_id(self.session_id)
+            except Exception:
+                resolved_id = self.session_id
+            if resolved_id and resolved_id != self.session_id:
+                ChatConsole().print(
+                    f"[{_DIM}]Session {_escape(self.session_id)} was compressed into "
+                    f"{_escape(resolved_id)}; resuming the descendant with your "
+                    f"transcript.[/]"
+                )
+                self.session_id = resolved_id
+                resolved_meta = self._session_db.get_session(self.session_id)
+                if resolved_meta:
+                    session_meta = resolved_meta
+            restored = self._session_db.get_messages_as_conversation(self.session_id)
+            if restored:
+                restored = [m for m in restored if m.get("role") != "session_meta"]
+                self.conversation_history = restored
+                msg_count = len([m for m in restored if m.get("role") == "user"])
+                title_part = ""
+                if session_meta.get("title"):
+                    title_part = f" \"{session_meta['title']}\""
+                ChatConsole().print(
+                    f"[bold {_accent_hex()}]↻ Resumed session[/] "
+                    f"[bold]{_escape(self.session_id)}[/]"
+                    f"[bold {_accent_hex()}]{_escape(title_part)}[/] "
+                    f"({msg_count} user message{'s' if msg_count != 1 else ''}, {len(restored)} total messages)"
+                )
+            else:
+                ChatConsole().print(
+                    f"[bold {_accent_hex()}]Session {_escape(self.session_id)} found but has no messages. Starting fresh.[/]"
+                )
+            # Re-open the session (clear ended_at so it's active again)
+            try:
+                self._session_db._conn.execute(
+                    "UPDATE sessions SET ended_at = NULL, end_reason = NULL WHERE id = ?",
+                    (self.session_id,),
+                )
+                self._session_db._conn.commit()
+            except Exception:
+                pass
+        
+        try:
+            runtime = runtime_override or {
+                "api_key": self.api_key,
+                "base_url": self.base_url,
+                "provider": self.provider,
+                "api_mode": self.api_mode,
+                "command": self.acp_command,
+                "args": list(self.acp_args or []),
+                "credential_pool": getattr(self, "_credential_pool", None),
+            }
+            effective_model = model_override or self.model
+            self.agent = AIAgent(
+                model=effective_model,
+                api_key=runtime.get("api_key"),
+                base_url=runtime.get("base_url"),
+                provider=runtime.get("provider"),
+                api_mode=runtime.get("api_mode"),
+                acp_command=runtime.get("command"),
+                acp_args=runtime.get("args"),
+                credential_pool=runtime.get("credential_pool"),
+                max_iterations=self.max_turns,
+                enabled_toolsets=self.enabled_toolsets,
+                disabled_toolsets=self.disabled_toolsets,
+                verbose_logging=self.verbose,
+                quiet_mode=not self.verbose,
+                ephemeral_system_prompt=self.system_prompt if self.system_prompt else None,
+                prefill_messages=self.prefill_messages or None,
+                reasoning_config=self.reasoning_config,
+                service_tier=self.service_tier,
+                request_overrides=request_overrides,
+                providers_allowed=self._providers_only,
+                providers_ignored=self._providers_ignore,
+                providers_order=self._providers_order,
+                provider_sort=self._provider_sort,
+                provider_require_parameters=self._provider_require_params,
+                provider_data_collection=self._provider_data_collection,
+                session_id=self.session_id,
+                platform="cli",
+                session_db=self._session_db,
+                clarify_callback=self._clarify_callback,
+                reasoning_callback=self._current_reasoning_callback(),
+
+                fallback_model=self._fallback_model,
+                thinking_callback=self._on_thinking,
+                checkpoints_enabled=self.checkpoints_enabled,
+                checkpoint_max_snapshots=self.checkpoint_max_snapshots,
+                pass_session_id=self.pass_session_id,
+                skip_context_files=self.ignore_rules,
+                skip_memory=self.ignore_rules,
+                tool_progress_callback=self._on_tool_progress,
+                tool_start_callback=self._on_tool_start,
+                tool_complete_callback=self._on_tool_complete if self._inline_diffs_enabled else None,
+                stream_delta_callback=self._stream_delta if self.streaming_enabled else None,
+                tool_gen_callback=self._on_tool_gen_start if self.streaming_enabled else None,
+            )
+            # Store reference for atexit memory provider shutdown
+            global _active_agent_ref
+            _active_agent_ref = self.agent
+            # Route agent status output through prompt_toolkit so ANSI escape
+            # sequences aren't garbled by patch_stdout's StdoutProxy (#2262).
+            self.agent._print_fn = _cprint
+            self._active_agent_route_signature = (
+                effective_model,
+                runtime.get("provider"),
+                runtime.get("base_url"),
+                runtime.get("api_mode"),
+                runtime.get("command"),
+                tuple(runtime.get("args") or ()),
+            )
+
+            # Force-create DB row on /title intent, then apply title.
+            if self._pending_title and self._session_db and self.agent:
+                try:
+                    self.agent._ensure_db_session()
+                    if self.agent._session_db_created:
+                        self._session_db.set_session_title(self.session_id, self._pending_title)
+                        _cprint(f"  Session title applied: {self._pending_title}")
+                        self._pending_title = None
+                    # else: row creation failed transiently — keep _pending_title for retry
+                except (ValueError, Exception) as e:
+                    _cprint(f"  Could not apply pending title: {e}")
+                    # Keep _pending_title so it can be retried after row creation succeeds
+            return True
+        except Exception as e:
+            ChatConsole().print(f"[bold red]Failed to initialize agent: {e}[/]")
+            return False
+
     
     def _show_security_advisories(self):
         """Show a startup banner if any unacked security advisories match.
@@ -10478,6 +10642,30 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                 self._pending_edit_snapshots[tool_call_id] = snapshot
         except Exception:
             logger.debug("Edit snapshot capture failed for %s", function_name, exc_info=True)
+        try:
+            audit_path = os.environ.get("HERMES_KANBAN_TOOL_AUDIT_PATH", "").strip()
+            if audit_path and function_name:
+                payload = {"tools_used": []}
+                audit_file = Path(audit_path)
+                if audit_file.exists():
+                    try:
+                        existing = json.loads(audit_file.read_text(encoding="utf-8"))
+                        if isinstance(existing, dict):
+                            payload.update(existing)
+                    except Exception:
+                        logger.debug("Tool audit read failed for %s", audit_path, exc_info=True)
+                tools_used = payload.get("tools_used")
+                if not isinstance(tools_used, list):
+                    tools_used = []
+                if function_name not in tools_used:
+                    tools_used.append(function_name)
+                payload["tools_used"] = tools_used
+                audit_file.parent.mkdir(parents=True, exist_ok=True)
+                tmp_path = audit_file.with_suffix(f"{audit_file.suffix}.tmp")
+                tmp_path.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+                tmp_path.replace(audit_file)
+        except Exception:
+            logger.debug("Tool audit capture failed for %s", function_name, exc_info=True)
 
     def _on_tool_complete(self, tool_call_id: str, function_name: str, function_args: dict, function_result: str):
         """Render file edits with inline diff after write-capable tools complete."""

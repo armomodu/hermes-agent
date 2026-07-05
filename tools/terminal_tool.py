@@ -37,6 +37,7 @@ import logging
 import os
 import platform
 import re
+import shlex
 import time
 import threading
 import atexit
@@ -290,6 +291,125 @@ def _validate_workdir(workdir: str) -> str | None:
                 )
         return "Blocked: workdir contains disallowed characters."
     return None
+
+
+def _get_kanban_workspace_root() -> Path | None:
+    """Return the governed workspace for task-scoped kanban workers."""
+    if not os.environ.get("HERMES_KANBAN_TASK"):
+        return None
+    workspace = os.environ.get("HERMES_KANBAN_WORKSPACE")
+    if not workspace:
+        return None
+    try:
+        return Path(workspace).expanduser().resolve()
+    except (OSError, ValueError):
+        return None
+
+
+def _resolve_workdir_candidate(candidate: str, base_dir: str) -> Path:
+    path = Path(candidate).expanduser()
+    if not path.is_absolute():
+        path = Path(base_dir) / path
+    return path.resolve()
+
+
+def _iter_explicit_cd_targets(command: str) -> list[str]:
+    """Extract explicit `cd <target>` segments from simple shell commands."""
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return []
+
+    targets: list[str] = []
+    at_command_start = True
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {";", "&&", "||", "&", "|"}:
+            at_command_start = True
+            index += 1
+            continue
+        if at_command_start:
+            if _looks_like_env_assignment(token):
+                index += 1
+                continue
+            if token == "cd":
+                if index + 1 < len(tokens):
+                    targets.append(tokens[index + 1])
+                    index += 2
+                    at_command_start = False
+                    continue
+                break
+            at_command_start = False
+        index += 1
+    return targets
+
+
+def _enforce_kanban_workspace_command_scope(
+    command: str,
+    workdir: str | None,
+    cwd: str,
+) -> tuple[str | None, str | None]:
+    """Validate task-scoped terminal execution stays inside the governed workspace."""
+    workspace_root = _get_kanban_workspace_root()
+    if workspace_root is None:
+        return None, workdir
+
+    effective_workdir = workdir
+    current_dir = Path(cwd).expanduser().resolve()
+
+    if effective_workdir:
+        try:
+            resolved_workdir = _resolve_workdir_candidate(effective_workdir, cwd)
+        except (OSError, ValueError):
+            return (
+                "Blocked: could not resolve workdir inside the governed kanban workspace. "
+                "Use a directory under $HERMES_KANBAN_WORKSPACE or block the task instead.",
+                None,
+            )
+        try:
+            resolved_workdir.relative_to(workspace_root)
+        except ValueError:
+            return (
+                f"Blocked: workdir {resolved_workdir} is outside the governed kanban "
+                f"workspace {workspace_root}. Use a directory under "
+                "$HERMES_KANBAN_WORKSPACE or block the task instead.",
+                None,
+            )
+        effective_workdir = str(resolved_workdir)
+        current_dir = resolved_workdir
+
+    for target in _iter_explicit_cd_targets(command):
+        if target == "-":
+            return (
+                "Blocked: 'cd -' is not allowed for task-scoped kanban workers because "
+                "it can leave the governed workspace. Stay inside "
+                "$HERMES_KANBAN_WORKSPACE or block the task instead.",
+                None,
+            )
+        try:
+            resolved_target = _resolve_workdir_candidate(target, str(current_dir))
+        except (OSError, ValueError):
+            return (
+                f"Blocked: could not resolve cd target {target!r} inside the governed "
+                "kanban workspace. Stay inside $HERMES_KANBAN_WORKSPACE or block the task instead.",
+                None,
+            )
+        try:
+            resolved_target.relative_to(workspace_root)
+        except ValueError:
+            return (
+                f"Blocked: cd target {resolved_target} leaves the governed kanban "
+                f"workspace {workspace_root}. Stay inside $HERMES_KANBAN_WORKSPACE or "
+                "block the task instead.",
+                None,
+            )
+        current_dir = resolved_target
+
+    return None, effective_workdir
 
 
 def _handle_sudo_failure(output: str, env_type: str) -> str:
@@ -1925,6 +2045,9 @@ def terminal_tool(
             image = ""
 
         cwd = overrides.get("cwd") or config["cwd"]
+        kanban_workspace_root = _get_kanban_workspace_root()
+        if kanban_workspace_root is not None:
+            cwd = str(kanban_workspace_root)
         default_timeout = config["timeout"]
         effective_timeout = timeout or default_timeout
 
@@ -2131,6 +2254,24 @@ def terminal_tool(
                     "error": workdir_error,
                     "status": "blocked"
                 }, ensure_ascii=False)
+        kanban_scope_error, normalized_workdir = _enforce_kanban_workspace_command_scope(
+            command=command,
+            workdir=workdir,
+            cwd=cwd,
+        )
+        if kanban_scope_error:
+            logger.warning(
+                "Blocked kanban out-of-workspace terminal call: %s (workdir=%s)",
+                _safe_command_preview(command),
+                workdir,
+            )
+            return json.dumps({
+                "output": "",
+                "exit_code": -1,
+                "error": kanban_scope_error,
+                "status": "blocked",
+            }, ensure_ascii=False)
+        workdir = normalized_workdir
 
         # Prepare command for execution
         pty_disabled_reason = None
@@ -2405,6 +2546,8 @@ def terminal_tool(
                             env=env,
                             default_cwd=cwd,
                         ),
+                        "cwd": workdir or cwd,
+
                     }
                     result = env.execute(command, **execute_kwargs)
                 except Exception as e:

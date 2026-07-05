@@ -104,6 +104,35 @@ KNOWN_TOOLSET_NAMES = frozenset(name.casefold() for name in get_toolset_names())
 _IS_WINDOWS = sys.platform == "win32"
 
 
+def _kanban_worker_skill_available(hermes_home: Optional[str]) -> bool:
+    """Best-effort check for the bundled ``kanban-worker`` skill.
+
+    Dispatcher-spawned workers can preload the skill additively, but only
+    when it actually resolves for the worker's effective ``HERMES_HOME``.
+    The skill is optional, so failures here must never block worker spawn.
+    """
+    try:
+        from tools.skill_manager_tool import _find_skill
+    except Exception:
+        return False
+
+    sentinel = object()
+    previous_home: object = os.environ.get("HERMES_HOME", sentinel)
+    try:
+        if hermes_home:
+            os.environ["HERMES_HOME"] = hermes_home
+        else:
+            os.environ.pop("HERMES_HOME", None)
+        return _find_skill("kanban-worker") is not None
+    except Exception:
+        return False
+    finally:
+        if previous_home is sentinel:
+            os.environ.pop("HERMES_HOME", None)
+        else:
+            os.environ["HERMES_HOME"] = str(previous_home)
+
+
 def _fire_kanban_lifecycle_hook(event: str, task_id: str, **fields: Any) -> None:
     """Fire a kanban lifecycle plugin hook, fully best-effort.
 
@@ -836,6 +865,11 @@ class Task:
     # set the env var. Lets clients render a per-session board without
     # relying on tenant + time-window heuristics.
     session_id: Optional[str] = None
+    # Optional per-task toolset restriction. When present, the
+    # dispatcher passes these via `hermes --toolsets ...` and the worker
+    # only sees tools from those toolsets.
+    enabled_toolsets: Optional[list] = None
+
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Task":
@@ -849,6 +883,14 @@ class Task:
                     skills_value = [str(s) for s in parsed if s]
             except Exception:
                 skills_value = None
+        enabled_toolsets_value: Optional[list] = None
+        if "enabled_toolsets" in keys and row["enabled_toolsets"]:
+            try:
+                parsed = json.loads(row["enabled_toolsets"])
+                if isinstance(parsed, list):
+                    enabled_toolsets_value = [str(s) for s in parsed if s]
+            except Exception:
+                enabled_toolsets_value = None
         return cls(
             id=row["id"],
             title=row["title"],
@@ -911,6 +953,8 @@ class Task:
             session_id=(
                 row["session_id"] if "session_id" in keys else None
             ),
+            enabled_toolsets=enabled_toolsets_value,
+
         )
 
 
@@ -1071,7 +1115,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- for tasks created from the CLI, dashboard, or any path that doesn't
     -- set the env var. Indexed so per-session list queries stay cheap on
     -- larger boards.
-    session_id           TEXT
+    session_id           TEXT,
+    -- Optional per-task toolset restriction, stored as JSON.
+    -- When set, the dispatcher spawns `hermes --toolsets ...` for this
+    -- task instead of inheriting the full profile tool surface.
+    enabled_toolsets     TEXT
+
 );
 
 CREATE TABLE IF NOT EXISTS task_links (
@@ -1897,6 +1946,10 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tasks_session_id ON tasks(session_id)"
     )
+    if "skills" not in cols:
+        _add_column_if_missing(conn, "tasks", "skills", "skills TEXT")
+    if "enabled_toolsets" not in cols:
+        _add_column_if_missing(conn, "tasks", "enabled_toolsets", "enabled_toolsets TEXT")
 
     # task_events gained a run_id column; back-fill it as NULL for
     # historical events (they predate runs and can't be attributed).
@@ -2262,6 +2315,8 @@ def create_task(
     initial_status: str = "running",
     session_id: Optional[str] = None,
     board: Optional[str] = None,
+    enabled_toolsets: Optional[Iterable[str]] = None,
+
 ) -> str:
     """Create a new task and optionally link it under parent tasks.
 
@@ -2285,6 +2340,11 @@ def create_task(
     each name to ``hermes --skills ...``. Use this to pin a task to a
     specialist skill (e.g. ``skills=["translation"]`` so the worker loads the
     translation skill regardless of the profile's default config).
+
+    ``enabled_toolsets`` optionally narrows the worker's tool surface
+    for this task. When present, the dispatcher passes the values
+    through to ``hermes --toolsets ...`` and the task runs with only
+    those toolsets available.
     """
     assignee = _canonical_assignee(assignee)
     if not title or not title.strip():
@@ -2348,6 +2408,25 @@ def create_task(
                 "capabilities (e.g. `web`, `browser`, `terminal`)."
             )
         skills_list = cleaned
+
+    enabled_toolsets_list: Optional[list[str]] = None
+    if enabled_toolsets is not None:
+        cleaned_toolsets: list[str] = []
+        seen_toolsets: set[str] = set()
+        for value in enabled_toolsets:
+            if not value:
+                continue
+            name = str(value).strip()
+            if not name or name in seen_toolsets:
+                continue
+            if "," in name:
+                raise ValueError(
+                    f"toolset name cannot contain comma: {name!r} "
+                    f"(pass separate --toolset flags instead of a comma-joined string)"
+                )
+            seen_toolsets.add(name)
+            cleaned_toolsets.append(name)
+        enabled_toolsets_list = cleaned_toolsets
 
     # Idempotency check — return the existing task instead of creating a
     # duplicate. Done BEFORE entering write_txn to keep the fast path fast
@@ -2425,8 +2504,9 @@ def create_task(
                         id, title, body, assignee, status, priority,
                         created_by, created_at, workspace_kind, workspace_path,
                         branch_name, tenant, idempotency_key, max_runtime_seconds,
-                        skills, max_retries, goal_mode, goal_max_turns, session_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        skills, max_retries, goal_mode, goal_max_turns, session_id,
+                        enabled_toolsets
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         task_id,
@@ -2448,6 +2528,8 @@ def create_task(
                         1 if goal_mode else 0,
                         int(goal_max_turns) if goal_max_turns is not None else None,
                         session_id,
+                        json.dumps(enabled_toolsets_list) if enabled_toolsets_list is not None else None,
+
                     ),
                 )
                 for pid in parents:
@@ -2467,6 +2549,8 @@ def create_task(
                         "branch_name": branch_name,
                         "skills": list(skills_list) if skills_list else None,
                         "goal_mode": bool(goal_mode) or None,
+                        "enabled_toolsets": list(enabled_toolsets_list) if enabled_toolsets_list else None,
+
                     },
                 )
             return task_id
@@ -4328,6 +4412,7 @@ def block_task(
     task_id: str,
     *,
     reason: Optional[str] = None,
+    metadata: Optional[dict] = None,
     expected_run_id: Optional[int] = None,
 ) -> bool:
     """Transition ``running -> blocked``."""
@@ -4365,6 +4450,7 @@ def block_task(
             conn, task_id,
             outcome="blocked", status="blocked",
             summary=reason,
+            metadata=metadata,
         )
         # Synthesize a run when blocking a never-claimed task so the
         # reason is preserved in attempt history.
@@ -4373,8 +4459,9 @@ def block_task(
                 conn, task_id,
                 outcome="blocked",
                 summary=reason,
+                metadata=metadata,
             )
-        _append_event(conn, task_id, "blocked", {"reason": reason}, run_id=run_id)
+        _append_event(conn, task_id, "blocked", {"reason": reason, "metadata": metadata}, run_id=run_id)
         _blocked_task = get_task(conn, task_id)
     _fire_kanban_lifecycle_hook(
         "kanban_task_blocked",
@@ -7381,6 +7468,15 @@ def _default_spawn(
     # but unusual symlink / Docker layouts are caught here too.
     env["HERMES_KANBAN_DB"] = str(kanban_db_path(board=board))
     env["HERMES_KANBAN_WORKSPACES_ROOT"] = str(workspaces_root(board=board))
+    workspace_root = Path(workspace).expanduser()
+    if (workspace_root / "apps" / "mission-control").is_dir():
+        # Mission Control's file-backed storage adapter can fall back to a
+        # local filesystem data directory when DB-backed env is absent. Pin
+        # that state outside the governed git worktree so worker-side tests or
+        # storage writes never mutate tracked source files like src/lib/*.json.
+        env["MISSION_CONTROL_DATA_DIR"] = str(
+            workspaces_root(board=board) / ".mission-control-state" / workspace_root.name
+        )
     # Board slug — the final defense-in-depth pin. If the worker ever
     # resolves kanban paths without the DB / workspaces env vars, the
     # board slug still forces it to the right directory.
@@ -7391,6 +7487,8 @@ def _default_spawn(
     # what the tool reads — set it explicitly here so comments are
     # attributed correctly regardless of how the child loads config.
     env["HERMES_PROFILE"] = profile_arg
+    if task.enabled_toolsets:
+        env["HERMES_KANBAN_ENABLED_TOOLSETS"] = ",".join(task.enabled_toolsets)
 
     cmd = [
         *_resolve_hermes_argv(),
@@ -7401,6 +7499,25 @@ def _default_spawn(
         # profile-local worker sessions still register configured hooks.
         "--accept-hooks",
     ]
+    # Auto-load the kanban-worker skill so every dispatched worker
+    # has the pattern library (good summary/metadata shapes, retry
+    # diagnostics, block-reason examples) in its context, even if
+    # the profile hasn't wired it into skills config. The MANDATORY
+    # lifecycle is already in the system prompt via KANBAN_GUIDANCE;
+    # this skill is the deeper reference. Users can point a profile
+    # at a different/additional skill via config if they want —
+    # --skills is additive to the profile's default skill set.
+    #
+    # Only add the flag when the skill actually resolves for the home
+    # the worker runs under: the bundled skill is absent from many
+    # profile-scoped skills dirs, and preloading a missing skill is
+    # fatal at CLI startup. Omitting it is safe — the lifecycle
+    # contract still ships via KANBAN_GUIDANCE.
+    if _kanban_worker_skill_available(env.get("HERMES_HOME")):
+        cmd.extend(["--skills", "kanban-worker"])
+    if task.enabled_toolsets:
+        cmd.extend(["--toolsets", ",".join(task.enabled_toolsets)])
+
     # Per-task force-loaded skills. Each name goes in its own
     # `--skills X` pair rather than a single comma-joined arg: the CLI
     # accepts both forms (action='append' + comma-split), but
@@ -7428,6 +7545,14 @@ def _default_spawn(
     log_path = log_dir / f"{task.id}.log"
     rotate_bytes, backup_count = worker_log_rotation_config()
     _rotate_worker_log(log_path, rotate_bytes, backup_count)
+    audit_path = log_dir / f"{task.id}.audit.json"
+    try:
+        audit_path.unlink()
+    except FileNotFoundError:
+        pass
+    env["HERMES_KANBAN_TOOL_AUDIT_PATH"] = str(audit_path)
+    _rotate_worker_log(log_path, DEFAULT_LOG_ROTATE_BYTES)
+
 
     # Use 'a' so a re-run on unblock appends rather than overwrites.
     log_f = open(log_path, "ab")
