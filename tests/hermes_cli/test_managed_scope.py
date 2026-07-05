@@ -42,6 +42,19 @@ def test_get_managed_dir_default_ignored_under_pytest(monkeypatch):
     assert managed_scope.get_managed_dir() is None
 
 
+def test_get_managed_dir_darwin_fallback_when_present(tmp_path, monkeypatch):
+    from hermes_cli import managed_scope
+
+    managed = tmp_path / "managed"
+    managed.mkdir()
+    monkeypatch.delenv("HERMES_MANAGED_DIR", raising=False)
+    monkeypatch.setattr(managed_scope, "_under_pytest", lambda: False)
+    monkeypatch.setattr(managed_scope, "_DEFAULT_MANAGED_DIR", tmp_path / "missing-etc")
+    monkeypatch.setattr(managed_scope, "_DARWIN_MANAGED_DIR", managed)
+    monkeypatch.setattr(managed_scope.sys, "platform", "darwin")
+    assert managed_scope.get_managed_dir() == managed
+
+
 # ── Loaders + key helpers ────────────────────────────────────────────────────
 
 

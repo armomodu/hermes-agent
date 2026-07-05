@@ -1,4 +1,6 @@
 """Surfacing tests — managed scope shown in `config show` and `hermes doctor`."""
+import importlib
+
 import pytest
 
 
@@ -71,3 +73,40 @@ def test_doctor_silent_with_no_managed_scope(tmp_path, monkeypatch, capsys):
     managed_scope.invalidate_managed_cache()
     doctor.managed_scope_check()
     assert capsys.readouterr().out.strip() == ""
+
+
+def test_doctor_warns_when_root_only_mc_keys_exist(tmp_path, monkeypatch, capsys):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text(
+        "CRON_SERVICE_TOKEN=test-token\nMC_API_URL=https://app.example/api\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("HERMES_MANAGED_DIR", str(tmp_path / "nope"))
+    from hermes_cli import managed_scope, doctor as doctor_mod
+
+    managed_scope.invalidate_managed_cache()
+    doctor_mod = importlib.reload(doctor_mod)
+    doctor_mod.managed_scope_check()
+    out = capsys.readouterr().out.lower()
+    assert "managed scope missing shared mission control env" in out
+    assert "cron_service_token" in out
+
+
+def test_doctor_warns_when_managed_scope_is_incomplete(homes, capsys):
+    home, managed = homes
+    (home / ".env").write_text(
+        "CRON_SERVICE_TOKEN=test-token\nMC_API_URL=https://app.example/api\n",
+        encoding="utf-8",
+    )
+    (managed / ".env").write_text("MC_API_URL=https://app.example/api\n", encoding="utf-8")
+    from hermes_cli import managed_scope, doctor as doctor_mod
+
+    managed_scope.invalidate_managed_cache()
+    doctor_mod = importlib.reload(doctor_mod)
+    doctor_mod.managed_scope_check()
+    out = capsys.readouterr().out.lower()
+    assert "managed scope active" in out
+    assert "managed scope incomplete for shared mission control env" in out
+    assert "cron_service_token" in out

@@ -13,6 +13,7 @@ from pathlib import Path
 from hermes_cli.config import get_project_root, get_hermes_home, get_env_path
 from hermes_cli.env_loader import load_hermes_dotenv
 from hermes_constants import display_hermes_home
+from hermes_constants import get_default_hermes_root
 from hermes_constants import agent_browser_runnable
 
 PROJECT_ROOT = get_project_root()
@@ -52,6 +53,14 @@ _PROVIDER_ENV_HINTS = (
     "OPENCODE_GO_API_KEY",
     "XIAOMI_API_KEY",
     "TOKENHUB_API_KEY",
+)
+
+# Machine-global Mission Control / release integration keys. These should live
+# in managed scope so every profile sees the same value without duplicating
+# secrets into each profile's ``.env``.
+_RECOMMENDED_MANAGED_ENV_KEYS = (
+    "CRON_SERVICE_TOKEN",
+    "MC_API_URL",
 )
 
 
@@ -101,6 +110,46 @@ def _termux_install_all_fallback_notes() -> list[str]:
 def _has_provider_env_config(content: str) -> bool:
     """Return True when ~/.hermes/.env contains provider auth/base URL settings."""
     return any(key in content for key in _PROVIDER_ENV_HINTS)
+
+
+def _parse_simple_env(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raw = path.read_text(encoding="latin-1")
+    except OSError:
+        return out
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        out[key.strip()] = value.strip().strip("\"'")
+    return out
+
+
+def _missing_recommended_managed_env_keys() -> list[str]:
+    """Return root-only machine-global keys that are absent from managed scope.
+
+    This catches the exact Mission Control provisioning gap where root
+    ``~/.hermes/.env`` carries control-plane credentials but named profiles do
+    not, so operator shells lose mutation auth unless the key is copied into
+    every profile. Managed scope is the intended fix.
+    """
+    try:
+        from hermes_cli import managed_scope
+    except Exception:
+        return []
+
+    root_env = get_default_hermes_root() / ".env"
+    root_values = _parse_simple_env(root_env)
+    managed_values = managed_scope.load_managed_env()
+    missing: list[str] = []
+    for key in _RECOMMENDED_MANAGED_ENV_KEYS:
+        if root_values.get(key) and not managed_values.get(key):
+            missing.append(key)
+    return missing
 
 
 def _honcho_is_configured_for_doctor() -> bool:
@@ -497,6 +546,12 @@ def managed_scope_check() -> None:
     except Exception:  # noqa: BLE001 — diagnostics must never crash
         return
     if managed_dir is None:
+        missing = _missing_recommended_managed_env_keys()
+        if missing:
+            check_warn(
+                "Managed scope missing shared Mission Control env",
+                f"(root-only keys: {', '.join(missing)}; create managed scope so every profile inherits them)",
+            )
         return
     n_cfg = len(managed_scope.managed_config_keys())
     n_env = len(managed_scope.load_managed_env())
@@ -504,6 +559,12 @@ def managed_scope_check() -> None:
         f"Managed scope active: {n_cfg} config key(s), {n_env} env key(s) "
         f"pinned by {managed_dir}"
     )
+    missing = _missing_recommended_managed_env_keys()
+    if missing:
+        check_warn(
+            "Managed scope incomplete for shared Mission Control env",
+            f"(still root-only: {', '.join(missing)})",
+        )
     if os.environ.get("HERMES_MANAGED_DIR", "").strip():
         check_info(f"managed dir set via HERMES_MANAGED_DIR={managed_dir}")
 
