@@ -28,6 +28,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from typing import Optional
 
 from hermes_cli.fallback_config import get_fallback_chain
+from hermes_cli.kanban_db import KANBAN_RATE_LIMIT_EXIT_CODE
 
 
 def _normalize_toolsets(toolsets: object = None) -> list[str] | None:
@@ -220,6 +221,11 @@ def run_oneshot(
             real_stdout.write("\n")
         real_stdout.flush()
 
+    if os.environ.get("HERMES_KANBAN_TASK") and result.get("failed"):
+        if _is_rate_limited_failure(result, response or ""):
+            return KANBAN_RATE_LIMIT_EXIT_CODE
+        return 1
+
     if (result.get("failed") or result.get("partial")) and not (response or "").strip():
         return 2
 
@@ -245,6 +251,43 @@ def _create_session_db_for_oneshot():
     except Exception as exc:
         logging.debug("SQLite session store not available for oneshot mode: %s", exc)
         return None
+
+
+def _is_rate_limited_failure(result: dict, response: str) -> bool:
+    """Best-effort detection of provider quota / rate-limit failures."""
+    if not isinstance(result, dict):
+        result = {}
+
+    error_context = result.get("api_error_context")
+    if isinstance(error_context, dict):
+        reason = str(error_context.get("reason") or "").lower()
+        message = str(error_context.get("message") or "").lower()
+        if (
+            "usage_limit_reached" in reason
+            or "gousagelimit" in reason
+            or "rate_limit" in reason
+            or "usage limit has been reached" in message
+            or "rate limit" in message
+            or "too many requests" in message
+        ):
+            return True
+
+    response_haystack = str(response or "").lower()
+    turn_reason = str(result.get("turn_exit_reason") or "").lower()
+    return (
+        "all_retries_exhausted_no_response" in turn_reason
+        and any(
+            needle in response_haystack
+            for needle in (
+                "usage_limit_reached",
+                "usage limit has been reached",
+                "rate limit",
+                "rate limited",
+                "http 429",
+                "too many requests",
+            )
+        )
+    )
 
 
 def _run_agent(

@@ -702,6 +702,45 @@ def test_oneshot_exit_code_zero_when_failed_with_error_text(monkeypatch, capsys)
     assert "HTTP 404" in capsys.readouterr().out
 
 
+def test_oneshot_kanban_failed_with_error_text_exits_nonzero(monkeypatch, capsys):
+    from hermes_cli.oneshot import run_oneshot
+
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_demo")
+    monkeypatch.setattr(
+        "hermes_cli.oneshot._run_agent",
+        lambda *_a, **_k: (
+            "API call failed after 3 retries: HTTP 404: model not found",
+            {"failed": True, "partial": False},
+        ),
+    )
+    assert run_oneshot("hi") == 1
+    assert "HTTP 404" in capsys.readouterr().out
+
+
+def test_oneshot_kanban_usage_limit_failure_returns_rate_limit_exit(monkeypatch, capsys):
+    from hermes_cli.kanban_db import KANBAN_RATE_LIMIT_EXIT_CODE
+    from hermes_cli.oneshot import run_oneshot
+
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_demo")
+    monkeypatch.setattr(
+        "hermes_cli.oneshot._run_agent",
+        lambda *_a, **_k: (
+            "API call failed after 3 retries: HTTP 429: The usage limit has been reached",
+            {
+                "failed": True,
+                "partial": False,
+                "turn_exit_reason": "all_retries_exhausted_no_response",
+                "api_error_context": {
+                    "reason": "usage_limit_reached",
+                    "message": "The usage limit has been reached",
+                },
+            },
+        ),
+    )
+    assert run_oneshot("hi") == KANBAN_RATE_LIMIT_EXIT_CODE
+    assert "usage limit" in capsys.readouterr().out.lower()
+
+
 def test_oneshot_reraises_keyboard_interrupt(monkeypatch):
     _stub_plugin_discovery(monkeypatch)
     import hermes_cli.oneshot as oneshot_mod
