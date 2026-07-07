@@ -2271,6 +2271,38 @@ def _check_file_length_invariant(conn: sqlite3.Connection) -> None:
         pass  # I/O errors during check are non-fatal; let normal ops continue
 
 
+def _check_file_length_invariant_with_retry(
+    conn: sqlite3.Connection,
+    *,
+    retries: int = 3,
+    base_delay_s: float = 0.01,
+) -> None:
+    """Re-check transient torn-extend observations before failing hard.
+
+    On local filesystems we have observed a rare post-COMMIT window where the
+    SQLite header page_count is visible before ``os.path.getsize()`` reflects
+    the final file length. The database then immediately reports healthy on a
+    fresh check. Treat that as a transient observation, not durable
+    corruption.
+
+    Persistent mismatches still raise after a short bounded retry loop, so a
+    genuinely truncated database remains a hard failure.
+    """
+    for attempt in range(retries + 1):
+        try:
+            _check_file_length_invariant(conn)
+            return
+        except sqlite3.DatabaseError as exc:
+            message = str(exc).lower()
+            is_torn_extend = (
+                "torn-extend detected" in message
+                or "page count mismatch" in message
+            )
+            if not is_torn_extend or attempt == retries:
+                raise
+            time.sleep(base_delay_s * (attempt + 1))
+
+
 # SQLite's own busy_timeout uses a near-deterministic backoff, so concurrent
 # writers re-collide in lockstep under a stampede. A jittered retry on the
 # transaction boundary breaks that convoy. Mirrors state.db's _execute_write:
@@ -2338,9 +2370,10 @@ def write_txn(conn: sqlite3.Connection):
             except sqlite3.OperationalError:
                 pass
             raise
-        # Post-commit file-length check: header page_count must match actual file pages.
-        # A discrepancy means a torn-extend — raise now rather than silently corrupt.
-        _check_file_length_invariant(conn)
+        # Post-commit file-length check: header page_count must match actual
+        # file pages. Retry briefly to avoid false positives from transient
+        # post-commit filesize lag; persistent mismatches still raise.
+        _check_file_length_invariant_with_retry(conn)
 
 
 # ---------------------------------------------------------------------------

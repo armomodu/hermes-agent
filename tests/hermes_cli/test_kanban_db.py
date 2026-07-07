@@ -4488,6 +4488,36 @@ def test_write_txn_raises_on_truncated_file(tmp_path):
     conn.close()
 
 
+def test_write_txn_recovers_from_transient_post_commit_filesize_lag(tmp_path):
+    """A one-check stale file size observation should not poison the commit."""
+    from hermes_cli.kanban_db import connect, write_txn
+
+    db = tmp_path / "test.db"
+    conn = connect(db_path=db)
+    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+    original_getsize = os.path.getsize
+    calls = {"count": 0}
+
+    def fake_getsize(path):
+        calls["count"] += 1
+        real_size = original_getsize(path)
+        if calls["count"] == 1:
+            return max(0, real_size - page_size)
+        return real_size
+
+    with unittest.mock.patch("hermes_cli.kanban_db.os.path.getsize", side_effect=fake_getsize):
+        with write_txn(conn) as c:
+            c.execute(
+                "INSERT INTO tasks (id, title, assignee, status, priority, created_at) "
+                "VALUES ('t_retry01', 'retry task', 'tester', 'todo', 0, 1234567890)"
+            )
+
+    row = conn.execute("SELECT title FROM tasks WHERE id='t_retry01'").fetchone()
+    assert row["title"] == "retry task"
+    assert calls["count"] >= 2
+    conn.close()
+
+
 def test_write_txn_post_commit_check_fires_every_call(tmp_path):
     """The invariant check runs on every write_txn call."""
     from hermes_cli.kanban_db import connect, write_txn
