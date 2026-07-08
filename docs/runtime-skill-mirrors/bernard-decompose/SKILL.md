@@ -24,7 +24,7 @@ If the live objective id is `4009e581-7231-4930-9a0d-b2b56b281d9e`:
 - do not merge the exact-parity slice with the task/objective taxonomy slice
 - immediately use:
   1. `python3 scripts/build_1a1_decomposition.py objective.json decomposition.json`
-  2. `python3 scripts/validate_decomposition_json.py decomposition.json 17`
+  2. `python3 scripts/validate_decomposition_json.py decomposition.json 19`
   3. submit the validated payload once
 
 For this objective, the helper script output is the authoritative decomposition shape unless the live
@@ -89,7 +89,7 @@ Those stay in the harness.
 
 ## Hard Constraints
 
-1. Max 7 child tasks per objective unless an objective-specific exception is explicitly stated in the objective payload. Current approved exception: objective `4009e581-7231-4930-9a0d-b2b56b281d9e` may use **17** child tasks one time to keep exact-parity proof, contract taxonomy, schema foundation, storage foundation, canonical write-path foundation, separated emitter families, readback query work, readback API/proof work, durable duplicate prevention, bounded backfill, docs, and gate review semantically bounded instead of rebundling known-risk surfaces.
+1. Max 7 child tasks per objective unless an objective-specific exception is explicitly stated in the objective payload. Current approved exception: objective `4009e581-7231-4930-9a0d-b2b56b281d9e` may use **19** child tasks one time to keep exact-parity proof, separated contract families, schema foundation, storage foundation, canonical write-path foundation, separated emitter families, readback query work, readback API/proof work, durable duplicate prevention, bounded backfill, docs, and gate review semantically bounded instead of rebundling known-risk surfaces.
    - count **all** emitted child tasks against this cap:
      - execution tasks
      - documentation tasks
@@ -143,7 +143,7 @@ Objective-exception execution-order rule:
   payload or direct operator instruction, not Bernard's decomposition turn
 - if a neighboring pair still conflicts after the direct 1:1 mapping, identify the exact conflict
   and fix only that edge; do not reopen the whole exception graph conceptually
-- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the approved 17-slice list is an execution-order
+- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the approved 19-slice list is an execution-order
   contract, not a brainstorming prompt
 - for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the objective payload is successfully read and no
   hard split-rule conflict is found, emit the task graph directly. Do not spend extra decomposition
@@ -153,26 +153,28 @@ Objective-exception execution-order rule:
 - for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the expected ordered slices are:
   1. exact-parity proof for task/objective workflow contract behavior
   2. task/objective workflow contract taxonomy
-  3. release/activation/escalation contract taxonomy
-  4. LedgerEvent Prisma schema foundation
-  5. storage boundary foundation
-  6. canonical ledger write-path foundation
-  7. task/objective emitter wiring
-  8. release-start emitter wiring
-  9. merge/deploy/verify emitter wiring
-  10. activation emitter wiring
-  11. escalation emitter wiring
-  12. deterministic readback query work
-  13. readback API and proof
-  14. durable duplicate prevention hardening
-  15. bounded backfill
-  16. docs
-  17. gate review
+  3. release contract taxonomy
+  4. activation contract taxonomy
+  5. escalation contract taxonomy
+  6. LedgerEvent Prisma schema foundation
+  7. storage boundary foundation
+  8. canonical ledger write-path foundation
+  9. task/objective emitter wiring
+  10. release-start emitter wiring
+  11. merge/deploy/verify emitter wiring
+  12. activation emitter wiring
+  13. escalation emitter wiring
+  14. deterministic readback query work
+  15. readback API and proof
+  16. durable duplicate prevention hardening
+  17. bounded backfill
+  18. docs
+  19. gate review
 - if one of those slices still cannot be emitted cleanly, stop and return the exact blocking slice
   conflict. Do not replace the list with a smaller "close enough" graph.
-- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the payload is read and the 17-slice list is
+- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the payload is read and the 19-slice list is
   confirmed, do not open a todo plan, do not perform extra repo discovery, and do not spend extra
-  turns re-deriving the graph. Build the 17-task payload directly, validate it once, and submit it.
+  turns re-deriving the graph. Build the 19-task payload directly, validate it once, and submit it.
 4. Every code/product-system task should assign to `William` or `Codex`.
 5. Every documentation/research-only task should assign to `Librarian` if appropriate.
 6. Priority should inherit from the objective unless there is a clear reason to lower urgency.
@@ -291,16 +293,16 @@ Preferred Mission Control helper scripts:
   - validates the final `decomposition_result` payload before the live POST
   - checks required fields, UUIDs, dependency references, gate-review count, gate-review coverage,
     and escaped globs
-  - for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, use max task count `17`
+  - for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, use max task count `19`
 - `scripts/build_1a1_decomposition.py objective.json decomposition.json`
   - deterministic builder for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`
-  - emits the approved 17-task graph directly from the live objective payload
+  - emits the approved 19-task graph directly from the live objective payload
   - when the objective id matches `4009e581-7231-4930-9a0d-b2b56b281d9e`, use this builder instead
     of freehand payload construction
   - preferred path for this canary:
     1. fetch objective payload to `objective.json`
     2. run `python3 scripts/build_1a1_decomposition.py objective.json decomposition.json`
-    3. run `python3 scripts/validate_decomposition_json.py decomposition.json 17`
+    3. run `python3 scripts/validate_decomposition_json.py decomposition.json 19`
     4. submit the validated payload once
 
 Reason:
@@ -773,6 +775,62 @@ Preferred split:
 - one task for `release` emitters
 - one task for `activation` emitters
 - one task for `escalation` emitters
+
+### Hard decomposition invalidators
+
+Reject the task before release if any William execution task does any of the following:
+
+- spans more than one workflow family
+- introduces more than one new abstraction class
+- owns more than one primary artifact class
+- claims a downstream consumer role but does not own a distinct substantive delta
+
+Workflow-family rule:
+
+- one William task may own exactly one workflow family such as:
+  - `task/objective`
+  - `release`
+  - `activation`
+  - `escalation`
+- do not bundle two or more families into one task, even when they share the same destination
+  writer, validator, storage boundary, or proof file
+- concrete invalid shape:
+  - `Define release/activation/escalation contract taxonomy`
+  - `Wire release + activation emitters`
+
+New-abstraction rule:
+
+- one William task may introduce at most one new abstraction class
+- abstraction classes include:
+  - contract family
+  - schema model or migration slice
+  - repository boundary
+  - canonical writer
+  - identity/correlation mapping surface
+  - emitter-wiring slice
+  - deterministic query surface
+  - API readback surface
+  - duplicate-prevention surface
+  - bounded backfill surface
+  - focused proof harness
+- if a task would introduce two or more of those, split it before release
+
+Distinct-delta rule:
+
+- if a downstream task says it consumes, broadens, preserves, or builds on an upstream artifact,
+  Bernard must name the exact new substantive delta it owns
+- if the likely successful delta is only cleanup, import reshuffling, comment edits, or re-running
+  proof against an unchanged upstream artifact, the downstream task is invalid and must be merged,
+  narrowed, or deleted
+
+Readback / duplicate-prevention dependency rule:
+
+- do not make readback-query or duplicate-prevention tasks depend on every runtime emitter family by
+  default
+- if the invariant can be proven from the canonical writer, established repository boundary, or
+  narrow seeded fixtures, prefer that narrower dependency set
+- only require full runtime-family lineage when the objective explicitly says the proof must be
+  sourced from those live runtime families
 
 Contract-provider rule for emitter wiring:
 
