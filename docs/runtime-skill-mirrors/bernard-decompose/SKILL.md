@@ -22,9 +22,10 @@ If the live objective id is `4009e581-7231-4930-9a0d-b2b56b281d9e`:
 - do not compress or reinterpret the approved slice list
 - do not emit a "close enough" variant
 - do not merge the exact-parity slice with the task/objective taxonomy slice
+- do not merge parity contract authoring, parity proof, and downstream taxonomy into one compromise slice
 - immediately use:
   1. `python3 scripts/build_1a1_decomposition.py objective.json decomposition.json`
-  2. `python3 scripts/validate_decomposition_json.py decomposition.json 21`
+  2. `python3 scripts/validate_decomposition_json.py decomposition.json 23`
   3. submit the validated payload once
 
 For this objective, the helper script output is the authoritative decomposition shape unless the live
@@ -89,7 +90,7 @@ Those stay in the harness.
 
 ## Hard Constraints
 
-1. Max 7 child tasks per objective unless an objective-specific exception is explicitly stated in the objective payload. Current approved exception: objective `4009e581-7231-4930-9a0d-b2b56b281d9e` may use **21** child tasks one time to keep exact-parity proof, separated contract families, schema foundation, repository boundary, storage exports, canonical writer, identity/correlation mapping, separated emitter families, readback query work, readback API/proof work, durable duplicate prevention, bounded backfill, docs, and gate review semantically bounded instead of rebundling known-risk surfaces.
+1. Max 7 child tasks per objective unless an objective-specific exception is explicitly stated in the objective payload. Current approved exception: objective `4009e581-7231-4930-9a0d-b2b56b281d9e` may use **23** child tasks one time to keep parity contract authoring, exact-parity proof, separated contract families, schema foundation, repository boundary, storage exports, canonical writer, identity/correlation mapping, task/objective API emitter wiring, task/objective worker emitter wiring, separated release/activation/escalation emitter families, readback query work, readback API/proof work, durable duplicate prevention, bounded backfill, docs, and gate review semantically bounded instead of rebundling known-risk surfaces.
    - count **all** emitted child tasks against this cap:
      - execution tasks
      - documentation tasks
@@ -143,7 +144,7 @@ Objective-exception execution-order rule:
   payload or direct operator instruction, not Bernard's decomposition turn
 - if a neighboring pair still conflicts after the direct 1:1 mapping, identify the exact conflict
   and fix only that edge; do not reopen the whole exception graph conceptually
-- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the approved 21-slice list is an execution-order
+- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the approved 23-slice list is an execution-order
   contract, not a brainstorming prompt
 - for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the objective payload is successfully read and no
   hard split-rule conflict is found, emit the task graph directly. Do not spend extra decomposition
@@ -151,32 +152,34 @@ Objective-exception execution-order rule:
 - for `4009e581-7231-4930-9a0d-b2b56b281d9e`, do not open a todo plan or freehand the payload once
   the objective is read. Use the deterministic helper path, validate once, and submit once.
 - for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the expected ordered slices are:
-  1. exact-parity proof for task/objective workflow contract behavior
-  2. task/objective workflow contract taxonomy
-  3. release contract taxonomy
-  4. activation contract taxonomy
-  5. escalation contract taxonomy
-  6. LedgerEvent Prisma schema foundation
-  7. repository boundary
-  8. storage exports
-  9. canonical ledger writer
-  10. stable identity/correlation mapping
-  11. task/objective emitter wiring
-  12. release-start emitter wiring
-  13. merge/deploy/verify emitter wiring
-  14. activation emitter wiring
-  15. escalation emitter wiring
-  16. deterministic readback query work
-  17. readback API and proof
-  18. durable duplicate prevention hardening
-  19. bounded backfill
-  20. docs
-  21. gate review
+  1. minimal task/objective parity contract authoring
+  2. exact-parity proof for task/objective workflow contract behavior
+  3. task/objective workflow contract taxonomy
+  4. release contract taxonomy
+  5. activation contract taxonomy
+  6. escalation contract taxonomy
+  7. LedgerEvent Prisma schema foundation
+  8. repository boundary
+  9. storage exports
+  10. canonical ledger writer
+  11. stable identity/correlation mapping
+  12. task/objective API entrypoint emitter wiring
+  13. task/objective worker transition emitter wiring
+  14. release-start emitter wiring
+  15. merge/deploy/verify emitter wiring
+  16. activation emitter wiring
+  17. escalation emitter wiring
+  18. deterministic readback query work
+  19. readback API and proof
+  20. durable duplicate prevention hardening
+  21. bounded backfill
+  22. docs
+  23. gate review
 - if one of those slices still cannot be emitted cleanly, stop and return the exact blocking slice
   conflict. Do not replace the list with a smaller "close enough" graph.
-- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the payload is read and the 21-slice list is
+- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the payload is read and the 23-slice list is
   confirmed, do not open a todo plan, do not perform extra repo discovery, and do not spend extra
-  turns re-deriving the graph. Build the 21-task payload directly, validate it once, and submit it.
+  turns re-deriving the graph. Build the 23-task payload directly, validate it once, and submit it.
 4. Every code/product-system task should assign to `William` or `Codex`.
 5. Every documentation/research-only task should assign to `Librarian` if appropriate.
 6. Priority should inherit from the objective unless there is a clear reason to lower urgency.
@@ -295,16 +298,16 @@ Preferred Mission Control helper scripts:
   - validates the final `decomposition_result` payload before the live POST
   - checks required fields, UUIDs, dependency references, gate-review count, gate-review coverage,
     and escaped globs
-  - for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, use max task count `21`
+  - for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, use max task count `23`
 - `scripts/build_1a1_decomposition.py objective.json decomposition.json`
   - deterministic builder for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`
-  - emits the approved 21-task graph directly from the live objective payload
+  - emits the approved 23-task graph directly from the live objective payload
   - when the objective id matches `4009e581-7231-4930-9a0d-b2b56b281d9e`, use this builder instead
     of freehand payload construction
   - preferred path for this canary:
     1. fetch objective payload to `objective.json`
     2. run `python3 scripts/build_1a1_decomposition.py objective.json decomposition.json`
-    3. run `python3 scripts/validate_decomposition_json.py decomposition.json 21`
+    3. run `python3 scripts/validate_decomposition_json.py decomposition.json 23`
     4. submit the validated payload once
 
 Reason:
@@ -981,9 +984,14 @@ For exact-parity work:
 - do not ask William to both reshape the contract files and invent a source-parser proof harness in
   the same execution task; split the parity surface smaller or isolate the proof machinery as its
   own bounded concern before activation
-- do not emit one William task as "exact-parity proof" and a second William task as same-family
-  contract authoring when both touch the same runtime authority files and the same
-  `src/lib/knowledge-plane/contracts/**` surface
+- do not merge same-family parity contract authoring and exact-parity proof into one task by
+  default just because they share runtime authority files
+- if the proof can stay **proof-only** against a named minimal contract slice authored upstream,
+  prefer split-by-hinge:
+  - upstream task authors the minimal production contract slice only
+  - downstream task proves exact parity against the live source with proof-only writable scope
+- merge parity authoring plus proof only when the proof itself cannot be evaluated without editing
+  that same production contract surface in the same pass
 - if the proof depends on contract definitions that do not already exist or are being reshaped in
   the same objective, either:
   - merge the parity implementation plus the minimal focused proof into one task, or
@@ -1044,6 +1052,12 @@ Hard rules:
 - if the task claims task/objective workflow family coverage and the objective or current product
   truth says direct route entrypoints still participate in live behavior, include those route files
   explicitly or narrow the task away from claiming that wider family coverage
+- if a `task/objective` emitter task would modify both:
+  - direct mutation entrypoints under `src/app/api/tasks/**` or `src/app/api/objectives/**`
+  - worker transition/promotion files such as `src/lib/workers/handlers.ts` or
+    `src/lib/workers/task-readiness-promotion-service.ts`
+  split it into separate API-entrypoint and worker-transition tasks unless the objective explicitly
+  states an atomic reason
 - minimum default split for Knowledge Plane contract authoring:
   - one task for `task/objective` workflow contracts
   - one task for `release/activation/escalation` contracts
