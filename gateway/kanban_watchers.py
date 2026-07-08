@@ -970,6 +970,8 @@ class GatewayKanbanWatchersMixin:
             return (
                 "file is not a database" in msg
                 or "database disk image is malformed" in msg
+                or "torn-extend detected" in msg
+                or "page count mismatch" in msg
             )
 
         def _tick_once_for_board(slug: str) -> "Optional[object]":
