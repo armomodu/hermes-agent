@@ -1600,6 +1600,8 @@ Known cap-conflict stop signals:
 - release-start wiring and merge/deploy/verify wiring would have to be merged back together
 - readback repository/query work and readback API/proof work would have to be merged back together
 - task/objective emitter work would have to omit still-live route/controller entrypoints
+- merge/runtime transition wiring in `objective-release-service.ts` would have to be merged together
+  with deploy/verify wiring in `objective-deployment-service.ts`
 
 Do not emit a task that says, in effect:
 
@@ -1615,12 +1617,27 @@ Downstream consumer read-only rule:
   whether that upstream surface is read-only input or writable scope for task B
 - if it is read-only input, keep that upstream file cluster out of `relatedFiles` and say plainly
   in `constraints` or `acceptanceCriteria` that William must preserve it unchanged
+- if the upstream authority is needed only so focused proof can read or compare against it, keep
+  that authority in `artifactPaths`, citations, or acceptance criteria and out of `relatedFiles`
+  unless task B is truly authoring that upstream surface
+- proof-sensitive upstream authority is not a reason to widen writable scope by default; it is a
+  reason to anchor the proof honestly while keeping the execution boundary narrow
 - if task B would only succeed by modifying that upstream surface, do not leave the task in an
   ambiguous consumer shape. Either widen it deliberately to include that writable upstream surface
   or split the writable upstream change into its own prior task
 - do not ship a downstream emitter/readback/consumer task that says "use the established storage
   boundary" while silently relying on William to discover mid-run that `src/lib/storage/**`,
   `prisma/**`, or upstream contract files must also change
+
+Known preserve-only authority trap:
+
+- a repository-boundary task that consumes `prisma/schema.prisma` or `prisma/migrations/**` as
+  upstream authority must not keep those Prisma paths writable just because tests derive
+  schema-sensitive assertions from them
+- if William would only read an upstream authority to prove a bounded downstream artifact, that
+  upstream authority remains read-only and should not be left writable "just in case"
+- if Bernard cannot keep the proof honest without leaving preserve-only authority writable, split
+  the proof task or emit the missing upstream provider task instead of expanding writable scope
 
 Known failure shape to prevent:
 
@@ -2216,6 +2233,18 @@ Before finalizing, apply the cognitive load check:
 - durable persistence + stable IDs/correlation IDs/source mapping + retry/replay safety
 - schema or migration foundation + storage or ledger foundation
 - prisma schema or migrations + `src/lib/storage/**` or `src/lib/knowledge-plane/ledger/**` foundation work
+- release-start + merge/deploy/verify
+- merge/runtime transition wiring in `objective-release-service.ts` + deploy/verify wiring in
+  `objective-deployment-service.ts`
+- release-family sub-hinge rule:
+  - one release-family task may own one coherent runtime transition subset plus focused proof
+  - if a task would need writable scope in both `objective-release-service.ts` and
+    `objective-deployment-service.ts`, presume split by sub-hinge before release
+  - default split:
+    1. merge/runtime transition wiring
+    2. deploy/verify wiring
+  - only keep both in one task when the objective text explicitly proves that the behavior must be
+    reviewed atomically and the task `constraints` states that atomic reason
 - Judge task size by independent invariants, not just file count. If a task asks William to
   satisfy 3 or more independent invariants, presume it is under-decomposed. Examples:
   - exact payload shape

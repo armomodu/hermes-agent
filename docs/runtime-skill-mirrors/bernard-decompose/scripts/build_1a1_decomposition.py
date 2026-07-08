@@ -22,7 +22,8 @@ SLICE_TITLES = [
     "Wire task/objective API entrypoint emitters to the canonical ledger path",
     "Wire task/objective worker transition emitters to the canonical ledger path",
     "Wire release-start emitters to the canonical ledger path",
-    "Wire merge/deploy/verify emitters to the canonical ledger path",
+    "Wire merge/runtime transition emitters to the canonical ledger path",
+    "Wire deploy/verify emitters to the canonical ledger path",
     "Wire activation emitters to the canonical ledger path",
     "Wire escalation emitters to the canonical ledger path",
     "Implement deterministic ledger readback queries",
@@ -158,6 +159,16 @@ def validate_bounded_graph(tasks: list[dict]) -> None:
         if "emitters to the canonical ledger path" in title.lower():
             if any("/src/lib/knowledge-plane/contracts/" in path for path in related_files):
                 errors.append(f"{title}: emitter task must not keep contracts/** writable")
+        if "repository boundary" in title.lower():
+            invalid = [path for path in related_files if "/prisma/" in path]
+            if invalid:
+                errors.append(f"{title}: preserve-only Prisma authority must not stay writable {invalid}")
+        if "merge/runtime transition emitters" in title.lower():
+            if any("objective-deployment-service.ts" in path for path in related_files):
+                errors.append(f"{title}: merge/runtime task must not include deployment-service writable scope")
+        if "deploy/verify emitters" in title.lower():
+            if any("objective-release-service.ts" in path for path in related_files):
+                errors.append(f"{title}: deploy/verify task must not include release-service writable scope")
 
         if "canonical ledger writer" in title.lower():
             if any("/src/lib/knowledge-plane/contracts/" in path for path in related_files):
@@ -219,8 +230,12 @@ def main() -> int:
         "apps/mission-control/src/lib/knowledge-plane/ledger/**",
         "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
-    merge_deploy_verify_emitter_paths = [
+    merge_runtime_emitter_paths = [
         "apps/mission-control/src/lib/release/objective-release-service.ts",
+        "apps/mission-control/src/lib/knowledge-plane/ledger/**",
+        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+    ]
+    deploy_verify_emitter_paths = [
         "apps/mission-control/src/lib/release/objective-deployment-service.ts",
         "apps/mission-control/src/lib/knowledge-plane/ledger/**",
         "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
@@ -432,17 +447,16 @@ def main() -> int:
         constraints=text(
             "Repository boundary only.",
             "Consume the established Prisma schema as upstream authority input; do not redesign it here.",
-            "The Prisma schema and migration files are in scope because the focused proof derives schema-sensitive assertions from that authority. Treat them as preserve-only unless a real upstream artifact gap must be surfaced.",
+            "The Prisma schema and migration files are preserve-only authority for proof and must remain read-only input.",
             "Do not wire storage exports, implement the canonical writer, emitter wiring, or duplicate prevention here.",
         ),
-        related_files=storage_foundation_paths + schema_paths,
-        artifact_paths=["apps/mission-control/src/lib/storage/**"],
+        related_files=storage_foundation_paths,
+        artifact_paths=["apps/mission-control/src/lib/storage/**", *schema_paths],
         next_action="Define the concrete repository boundary that later storage-export and writer tasks will call.",
         depends_on=[t4["id"]],
         workflow_families=["ledger-storage"],
         abstraction_classes=["repository boundary"],
         primary_artifact_class="repository boundary",
-        proof_required_scope=schema_paths,
     )
     tasks.append(t5)
 
@@ -600,16 +614,16 @@ def main() -> int:
 
     t9 = make_task(
         title=SLICE_TITLES[14],
-        summary="Wire merge/deploy/verify runtime events to the canonical ledger path using the already-authored release contract family.",
+        summary="Wire merge/runtime transition events to the canonical ledger path using the already-authored release contract family.",
         acceptance=text(
-            "Merge, deploy, and verify runtime behavior emits through the canonical writer.",
+            "Merge/runtime transition behavior emits through the canonical writer.",
             "The task consumes the release contract family rather than authoring it inline.",
-            "Focused tests prove merge/deploy/verify emission behavior.",
+            "Focused tests prove merge/runtime transition emission behavior.",
         ),
-        constraints=text("Merge/deploy/verify emitter family only.", "Do not bundle release-start, activation, or escalation here."),
-        related_files=merge_deploy_verify_emitter_paths,
+        constraints=text("Merge/runtime transition emitter slice only.", "Do not bundle release-start, deploy/verify, activation, or escalation here."),
+        related_files=merge_runtime_emitter_paths,
         artifact_paths=["apps/mission-control/src/lib/knowledge-plane/__tests__/**"],
-        next_action="Wire only merge/deploy/verify surfaces to the canonical ledger writer.",
+        next_action="Wire only merge/runtime transition surfaces to the canonical ledger writer.",
         depends_on=[t3["id"], t6["id"], t6b["id"]],
         workflow_families=["release"],
         abstraction_classes=["emitter-wiring slice"],
@@ -619,6 +633,25 @@ def main() -> int:
 
     t10 = make_task(
         title=SLICE_TITLES[15],
+        summary="Wire deploy/verify runtime events to the canonical ledger path using the already-authored release contract family.",
+        acceptance=text(
+            "Deploy/verify runtime behavior emits through the canonical writer.",
+            "The task consumes the release contract family rather than authoring it inline.",
+            "Focused tests prove deploy/verify emission behavior.",
+        ),
+        constraints=text("Deploy/verify emitter slice only.", "Do not bundle release-start, merge/runtime transition, activation, or escalation here."),
+        related_files=deploy_verify_emitter_paths,
+        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/__tests__/**"],
+        next_action="Wire only deploy/verify surfaces to the canonical ledger writer.",
+        depends_on=[t3["id"], t6["id"], t6b["id"]],
+        workflow_families=["release"],
+        abstraction_classes=["emitter-wiring slice"],
+        primary_artifact_class="emitter-wiring slice",
+    )
+    tasks.append(t10)
+
+    t11 = make_task(
+        title=SLICE_TITLES[16],
         summary="Wire activation runtime events to the canonical ledger path using the already-authored activation contract family.",
         acceptance=text(
             "Activation runtime behavior emits through the canonical writer.",
@@ -634,10 +667,10 @@ def main() -> int:
         abstraction_classes=["emitter-wiring slice"],
         primary_artifact_class="emitter-wiring slice",
     )
-    tasks.append(t10)
+    tasks.append(t11)
 
-    t11 = make_task(
-        title=SLICE_TITLES[16],
+    t12 = make_task(
+        title=SLICE_TITLES[17],
         summary="Wire escalation runtime events to the canonical ledger path using the already-authored escalation contract family.",
         acceptance=text(
             "Escalation runtime behavior emits through the canonical writer.",
@@ -660,10 +693,10 @@ def main() -> int:
         abstraction_classes=["emitter-wiring slice"],
         primary_artifact_class="emitter-wiring slice",
     )
-    tasks.append(t11)
+    tasks.append(t12)
 
-    t12 = make_task(
-        title=SLICE_TITLES[17],
+    t13 = make_task(
+        title=SLICE_TITLES[18],
         summary="Implement the deterministic ledger readback query surface over the persisted ledger events.",
         acceptance=text(
             "Deterministic readback queries exist for objective, task, agent, and event-type access patterns.",
@@ -679,10 +712,10 @@ def main() -> int:
         abstraction_classes=["deterministic query surface"],
         primary_artifact_class="deterministic query surface",
     )
-    tasks.append(t12)
+    tasks.append(t13)
 
-    t13 = make_task(
-        title=SLICE_TITLES[18],
+    t14 = make_task(
+        title=SLICE_TITLES[19],
         summary="Expose ledger readback through the API surface and prove the readback contract end to end.",
         acceptance=text(
             "Ledger readback API routes exist and consume the deterministic query layer.",
@@ -693,15 +726,15 @@ def main() -> int:
         related_files=api_paths,
         artifact_paths=["apps/mission-control/src/app/api/knowledge/ledger/**"],
         next_action="Expose the deterministic ledger query surface through the API and prove the API contract.",
-        depends_on=[t12["id"]],
+        depends_on=[t13["id"]],
         workflow_families=["readback"],
         abstraction_classes=["API readback surface"],
         primary_artifact_class="API readback surface",
     )
-    tasks.append(t13)
+    tasks.append(t14)
 
-    t14 = make_task(
-        title=SLICE_TITLES[19],
+    t15 = make_task(
+        title=SLICE_TITLES[20],
         summary="Harden replay/remediation duplicate prevention so retries, replay, remediation loops, and repeated writes do not create incorrect duplicate ledger writes.",
         acceptance=text(
             "Duplicate prevention is enforced on the ledger write path for the relevant retry/replay surfaces.",
@@ -721,10 +754,10 @@ def main() -> int:
         abstraction_classes=["duplicate-prevention surface"],
         primary_artifact_class="duplicate-prevention surface",
     )
-    tasks.append(t14)
+    tasks.append(t15)
 
-    t15 = make_task(
-        title=SLICE_TITLES[20],
+    t16 = make_task(
+        title=SLICE_TITLES[21],
         summary="Backfill a bounded recent slice of factory workflow history into the ledger without expanding into full retrieval or synthesis work.",
         acceptance=text(
             "A bounded recent backfill path exists for the intended workflow slice.",
@@ -738,15 +771,15 @@ def main() -> int:
         ],
         artifact_paths=["apps/mission-control/src/lib/knowledge-plane/ledger/**"],
         next_action="Implement the bounded workflow-history backfill over the hardened ledger write path.",
-        depends_on=[t12["id"], t14["id"]],
+        depends_on=[t13["id"], t15["id"]],
         workflow_families=["backfill"],
         abstraction_classes=["bounded backfill surface"],
         primary_artifact_class="bounded backfill surface",
     )
-    tasks.append(t15)
+    tasks.append(t16)
 
-    t16 = make_task(
-        title=SLICE_TITLES[21],
+    t17 = make_task(
+        title=SLICE_TITLES[22],
         summary="Document the workflow-ledger contract, operator proof path, and objective-local scope boundaries for this phase.",
         acceptance=text(
             "Repo-local knowledge-plane documentation captures the workflow-ledger contract and proof surfaces introduced by this objective.",
@@ -761,15 +794,15 @@ def main() -> int:
         depends_on=[
             t1["id"], t1b["id"], t2["id"], t3["id"], t3b["id"], t3c["id"], t4["id"], t5["id"],
             t5b["id"], t6["id"], t6b["id"], t7["id"], t7b["id"], t8["id"], t9["id"], t10["id"],
-            t11["id"], t12["id"], t13["id"], t14["id"], t15["id"],
+            t11["id"], t12["id"], t13["id"], t14["id"], t15["id"], t16["id"],
         ],
         workflow_families=["docs"],
         abstraction_classes=["docs"],
         primary_artifact_class="docs",
     )
-    tasks.append(t16)
+    tasks.append(t17)
 
-    t17 = make_task(
+    t18 = make_task(
         title="Gate review workflow-ledger canary",
         summary="Review the completed 1A.1 execution graph only after all bounded slices are done and the proof surfaces are present.",
         acceptance=text(
@@ -801,7 +834,7 @@ def main() -> int:
         review_mode="gate_review",
         depends_on=[task["id"] for task in tasks],
     )
-    tasks.append(t17)
+    tasks.append(t18)
 
     validate_bounded_graph(tasks)
     payload = {
