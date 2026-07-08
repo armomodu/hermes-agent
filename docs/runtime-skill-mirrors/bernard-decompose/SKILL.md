@@ -24,7 +24,7 @@ If the live objective id is `4009e581-7231-4930-9a0d-b2b56b281d9e`:
 - do not merge the exact-parity slice with the task/objective taxonomy slice
 - immediately use:
   1. `python3 scripts/build_1a1_decomposition.py objective.json decomposition.json`
-  2. `python3 scripts/validate_decomposition_json.py decomposition.json 19`
+  2. `python3 scripts/validate_decomposition_json.py decomposition.json 21`
   3. submit the validated payload once
 
 For this objective, the helper script output is the authoritative decomposition shape unless the live
@@ -89,7 +89,7 @@ Those stay in the harness.
 
 ## Hard Constraints
 
-1. Max 7 child tasks per objective unless an objective-specific exception is explicitly stated in the objective payload. Current approved exception: objective `4009e581-7231-4930-9a0d-b2b56b281d9e` may use **19** child tasks one time to keep exact-parity proof, separated contract families, schema foundation, storage foundation, canonical write-path foundation, separated emitter families, readback query work, readback API/proof work, durable duplicate prevention, bounded backfill, docs, and gate review semantically bounded instead of rebundling known-risk surfaces.
+1. Max 7 child tasks per objective unless an objective-specific exception is explicitly stated in the objective payload. Current approved exception: objective `4009e581-7231-4930-9a0d-b2b56b281d9e` may use **21** child tasks one time to keep exact-parity proof, separated contract families, schema foundation, repository boundary, storage exports, canonical writer, identity/correlation mapping, separated emitter families, readback query work, readback API/proof work, durable duplicate prevention, bounded backfill, docs, and gate review semantically bounded instead of rebundling known-risk surfaces.
    - count **all** emitted child tasks against this cap:
      - execution tasks
      - documentation tasks
@@ -143,7 +143,7 @@ Objective-exception execution-order rule:
   payload or direct operator instruction, not Bernard's decomposition turn
 - if a neighboring pair still conflicts after the direct 1:1 mapping, identify the exact conflict
   and fix only that edge; do not reopen the whole exception graph conceptually
-- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the approved 19-slice list is an execution-order
+- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the approved 21-slice list is an execution-order
   contract, not a brainstorming prompt
 - for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the objective payload is successfully read and no
   hard split-rule conflict is found, emit the task graph directly. Do not spend extra decomposition
@@ -157,24 +157,26 @@ Objective-exception execution-order rule:
   4. activation contract taxonomy
   5. escalation contract taxonomy
   6. LedgerEvent Prisma schema foundation
-  7. storage boundary foundation
-  8. canonical ledger write-path foundation
-  9. task/objective emitter wiring
-  10. release-start emitter wiring
-  11. merge/deploy/verify emitter wiring
-  12. activation emitter wiring
-  13. escalation emitter wiring
-  14. deterministic readback query work
-  15. readback API and proof
-  16. durable duplicate prevention hardening
-  17. bounded backfill
-  18. docs
-  19. gate review
+  7. repository boundary
+  8. storage exports
+  9. canonical ledger writer
+  10. stable identity/correlation mapping
+  11. task/objective emitter wiring
+  12. release-start emitter wiring
+  13. merge/deploy/verify emitter wiring
+  14. activation emitter wiring
+  15. escalation emitter wiring
+  16. deterministic readback query work
+  17. readback API and proof
+  18. durable duplicate prevention hardening
+  19. bounded backfill
+  20. docs
+  21. gate review
 - if one of those slices still cannot be emitted cleanly, stop and return the exact blocking slice
   conflict. Do not replace the list with a smaller "close enough" graph.
-- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the payload is read and the 19-slice list is
+- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the payload is read and the 21-slice list is
   confirmed, do not open a todo plan, do not perform extra repo discovery, and do not spend extra
-  turns re-deriving the graph. Build the 19-task payload directly, validate it once, and submit it.
+  turns re-deriving the graph. Build the 21-task payload directly, validate it once, and submit it.
 4. Every code/product-system task should assign to `William` or `Codex`.
 5. Every documentation/research-only task should assign to `Librarian` if appropriate.
 6. Priority should inherit from the objective unless there is a clear reason to lower urgency.
@@ -831,6 +833,45 @@ Readback / duplicate-prevention dependency rule:
   narrow seeded fixtures, prefer that narrower dependency set
 - only require full runtime-family lineage when the objective explicitly says the proof must be
   sourced from those live runtime families
+
+Source-anchor vs writable-scope rule:
+
+- if a runtime, route, worker, or release file is being used as the source-of-truth authority for a
+  contract task, keep it out of `relatedFiles` by default
+- source anchors belong in:
+  - `artifactPaths`
+  - `links`
+  - `acceptanceCriteria`
+  - `constraints`
+- `relatedFiles` is for files William is expected to edit in the current task
+- contract-authoring tasks should usually keep writable scope to:
+  - `src/lib/knowledge-plane/contracts/**`
+  - focused proof files for that contract slice
+
+Consumer-surface lock rule:
+
+- if a task says it consumes an existing contract, schema, repository boundary, or writer surface,
+  that upstream surface is read-only by default
+- do not leave the consumed upstream surface in `relatedFiles` unless the task explicitly owns
+  modifications to it
+- emitter tasks should not carry writable `contracts/**` scope unless contract edits are part of
+  the explicit acceptance hinge
+- writer, readback, duplicate-prevention, and backfill tasks should not keep upstream contract files
+  writable just because those contracts are referenced by proof or by task wording
+
+One-primary-artifact hard fail:
+
+- reject the task before release if it still owns more than one primary artifact class
+- concrete invalid shapes for this canary include:
+  - `repository boundary` + `storage exports`
+  - `canonical writer` + `identity/correlation mapping`
+- if both are needed, split them and serialize with `dependsOn`
+
+Docs completeness dependency rule:
+
+- if a docs task claims to document the broad workflow-ledger contract or operator proof path, it
+  must depend on every implementation slice it claims to describe
+- otherwise narrow the docs task so it documents only the final already-implemented surfaces
 
 Contract-provider rule for emitter wiring:
 
