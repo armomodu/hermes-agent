@@ -295,16 +295,16 @@ Preferred Mission Control helper scripts:
   - validates the final `decomposition_result` payload before the live POST
   - checks required fields, UUIDs, dependency references, gate-review count, gate-review coverage,
     and escaped globs
-  - for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, use max task count `19`
+  - for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, use max task count `21`
 - `scripts/build_1a1_decomposition.py objective.json decomposition.json`
   - deterministic builder for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`
-  - emits the approved 19-task graph directly from the live objective payload
+  - emits the approved 21-task graph directly from the live objective payload
   - when the objective id matches `4009e581-7231-4930-9a0d-b2b56b281d9e`, use this builder instead
     of freehand payload construction
   - preferred path for this canary:
     1. fetch objective payload to `objective.json`
     2. run `python3 scripts/build_1a1_decomposition.py objective.json decomposition.json`
-    3. run `python3 scripts/validate_decomposition_json.py decomposition.json 19`
+    3. run `python3 scripts/validate_decomposition_json.py decomposition.json 21`
     4. submit the validated payload once
 
 Reason:
@@ -1402,6 +1402,20 @@ Do not emit a contradictory task that says it consumes an upstream artifact whil
 `dependsOn: []` or omitting the owning upstream task from `dependsOn`. That shape breaks governed
 workspace lineage and turns a valid bounded task into a stale-base retry trap.
 
+Exception: if the focused proof itself must load, parse, or derive assertions from an upstream
+source-of-truth artifact inside the governed workspace, Bernard must choose one of only two legal
+shapes:
+
+1. authorize that upstream artifact in `relatedFiles` and say plainly that it is preserve-only /
+   read-only input unless the task is explicitly expected to change it, or
+2. split the task so the proof lands on the upstream-producing task instead of the downstream
+   consumer task
+
+Do **not** emit a task whose proof depends on `prisma/schema.prisma`, a migration file, a canonical
+contract file, or another source-of-truth artifact while that artifact is absent from writable
+scope and absent from the upstream task lineage. That is the known "proof depends on authority that
+William cannot legally use" trap.
+
 Call this out explicitly in:
 
 - `summary`
@@ -2140,6 +2154,20 @@ Before finalizing, apply the cognitive load check:
   then presume that task is under-decomposed even if the file set is only 2-3 files
 - Exact-parity plus direct proof can stay together. Exact-parity plus proof-harness invention
   cannot.
+- Exact-parity tasks default to **proof-only writable scope**. The writable surface should usually
+  be the focused proof file(s) and only the minimal implementation file that is explicitly the
+  parity output.
+- If a production contract file is genuinely the intended output of the parity task, say that
+  explicitly in the emitted task fields:
+  - title names the contract surface or contract slice being authored
+  - summary says that the task authors that minimal production contract surface
+  - constraints say the task must not widen into broader taxonomy, validator invention, or adjacent
+    workflow families
+- Do **not** emit a task titled only as "prove parity" while `relatedFiles` authorizes
+  `contracts/**`, validators, or other production-authoring surfaces. That wording hides the real
+  writable output and invites William to invent a new abstraction layer.
+- If Bernard cannot name the exact production contract file or contract slice that the parity task
+  is allowed to author, keep the task proof-only instead of leaving broader production scope open.
 - If a task spans both Dashboard and Overview, or both adapter behavior and task-record/readback behavior, presume split unless the change must be atomic
 - If a task spans adapter or routing logic plus normalizers, MC client, storage types/validation,
   API readback, and deterministic tests, presume split-by-output unless the objective explicitly
@@ -2273,7 +2301,7 @@ If any answer is “no,” the task is too broad or mis-shaped.
 
 Check:
 
-- 3-7 tasks total unless an objective-specific approved exception is in force; for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, **17** tasks is valid and preferred over re-bundling semantic-risk work
+- 3-7 tasks total unless an objective-specific approved exception is in force; for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, **21** tasks is valid and preferred over re-bundling semantic-risk work
 - each task has one bounded output
 - no task is open-ended
 - no task asks William to do harness-owned release work

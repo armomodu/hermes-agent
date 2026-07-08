@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 SLICE_TITLES = [
-    "Prove task/objective workflow parity against the live route contract",
+    "Author task/objective workflow contract parity slice and prove exact parity against the live route contract",
     "Define task/objective workflow contract taxonomy",
     "Define release workflow contract taxonomy",
     "Define activation workflow contract taxonomy",
@@ -56,6 +56,8 @@ def make_task(
     abstraction_classes: list[str] | None = None,
     primary_artifact_class: str | None = None,
     distinct_delta: bool = True,
+    parity_scope_mode: str | None = None,
+    proof_required_scope: list[str] | None = None,
 ) -> dict:
     task = {
         "id": new_id(),
@@ -80,6 +82,8 @@ def make_task(
             "abstraction_classes": abstraction_classes or [],
             "primary_artifact_class": primary_artifact_class,
             "distinct_delta": distinct_delta,
+            "parity_scope_mode": parity_scope_mode,
+            "proof_required_scope": proof_required_scope or [],
         },
     }
     if depends_on:
@@ -101,6 +105,8 @@ def validate_bounded_graph(tasks: list[dict]) -> None:
         abstractions = meta.get("abstraction_classes", [])
         primary_artifact = meta.get("primary_artifact_class")
         distinct_delta = meta.get("distinct_delta", True)
+        parity_scope_mode = meta.get("parity_scope_mode")
+        proof_required_scope = meta.get("proof_required_scope", [])
         title = task["title"]
 
         if len(families) != 1:
@@ -113,6 +119,23 @@ def validate_bounded_graph(tasks: list[dict]) -> None:
             errors.append(f"{title}: downstream task lacks a distinct substantive delta")
 
         related_files = task.get("relatedFiles", [])
+        title_lower = title.lower()
+
+        if "parity" in title_lower:
+            if parity_scope_mode not in {"proof_only", "contract_output"}:
+                errors.append(f"{title}: parity task missing parity_scope_mode")
+            if parity_scope_mode == "proof_only":
+                invalid = [
+                    path for path in related_files
+                    if "/__tests__/" not in path
+                ]
+                if invalid:
+                    errors.append(f"{title}: proof-only parity task includes non-proof writable scope {invalid}")
+            if parity_scope_mode == "contract_output":
+                if not any("/src/lib/knowledge-plane/contracts/" in path for path in related_files):
+                    errors.append(f"{title}: contract-output parity task missing contracts writable scope")
+                if "contract" not in title_lower and "contract" not in task.get("summary", "").lower():
+                    errors.append(f"{title}: contract-output parity task does not name the production contract output")
 
         if "contract taxonomy" in title.lower():
             invalid = [
@@ -135,6 +158,13 @@ def validate_bounded_graph(tasks: list[dict]) -> None:
             errors.append(f"{title}: readback task depends on too many upstream slices")
         if "duplicate prevention" in title.lower() and len(task.get("dependsOn", [])) > 3:
             errors.append(f"{title}: duplicate-prevention task depends on too many upstream slices")
+
+        missing_proof_scope = [
+            path for path in proof_required_scope
+            if path not in related_files
+        ]
+        if missing_proof_scope:
+            errors.append(f"{title}: proof depends on upstream authority outside writable scope {missing_proof_scope}")
 
     if errors:
         raise SystemExit("bounded-graph validation failed:\n- " + "\n- ".join(errors))
@@ -221,14 +251,16 @@ def main() -> int:
 
     t1 = make_task(
         title=SLICE_TITLES[0],
-        summary="Mirror the current task/objective workflow behavior into the knowledge-plane contract layer with exact-parity proof anchored to the live route surfaces.",
+        summary="Author the minimal task/objective production contract parity slice and prove exact parity against the live route surfaces without widening into broader taxonomy.",
         acceptance=text(
             "The focused parity test proves the emitted task/objective workflow contract matches the live Mission Control behavior for the targeted route/transition surface.",
+            "The task authors only the minimal production contract parity slice needed for that exact branch and does not broaden into remaining taxonomy.",
             "The parity task does not redefine broader release, activation, or escalation families.",
             "Mission Control typecheck and the focused parity proof pass.",
         ),
         constraints=text(
-            "Exact-parity task only. Keep the minimal route-anchored proof inside this task.",
+            "Exact-parity contract-output task only. Keep the minimal route-anchored proof inside this task.",
+            "The only production-authoring output in scope is the minimal task/objective contract parity slice; do not widen into validators, broader taxonomy, or adjacent workflow families.",
             "Do not broaden into general contract taxonomy for other workflow families.",
         ),
         related_files=parity_writable_paths,
@@ -237,6 +269,7 @@ def main() -> int:
         workflow_families=["task/objective"],
         abstraction_classes=["focused proof slice"],
         primary_artifact_class="focused proof slice",
+        parity_scope_mode="contract_output",
     )
     tasks.append(t1)
 
@@ -366,16 +399,18 @@ def main() -> int:
         ),
         constraints=text(
             "Repository boundary only.",
-            "Consume the established Prisma schema as read-only input; do not redesign it here.",
+            "Consume the established Prisma schema as upstream authority input; do not redesign it here.",
+            "The Prisma schema and migration files are in scope because the focused proof derives schema-sensitive assertions from that authority. Treat them as preserve-only unless a real upstream artifact gap must be surfaced.",
             "Do not wire storage exports, implement the canonical writer, emitter wiring, or duplicate prevention here.",
         ),
-        related_files=storage_foundation_paths,
+        related_files=storage_foundation_paths + schema_paths,
         artifact_paths=["apps/mission-control/src/lib/storage/**"],
         next_action="Define the concrete repository boundary that later storage-export and writer tasks will call.",
         depends_on=[t4["id"]],
         workflow_families=["ledger-storage"],
         abstraction_classes=["repository boundary"],
         primary_artifact_class="repository boundary",
+        proof_required_scope=schema_paths,
     )
     tasks.append(t5)
 
