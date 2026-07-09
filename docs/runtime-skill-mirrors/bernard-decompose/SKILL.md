@@ -23,9 +23,15 @@ If the live objective id is `4009e581-7231-4930-9a0d-b2b56b281d9e`:
 - do not emit a "close enough" variant
 - do not merge the exact-parity slice with the task/objective taxonomy slice
 - do not merge parity contract authoring, parity proof, and downstream taxonomy into one compromise slice
+- submit the canary in contract mode only
+- same workflow family is not enough; every William slice must stay inside one writable mutation root
+- proof files are read-only anchors by default and become writable only in proof-only slices
+- do not submit legacy-only authored `summary`, `acceptanceCriteria`, `constraints`, `relatedFiles`, `artifactPaths`, or `dependsOn` as the source of truth for 1A.1
+- Mission Control compiles execution scope, support prose, and dependency edges for this canary from `taskContract`
+- the exact-parity proof slice must remain proof-only in writable scope
 - immediately use:
   1. `python3 scripts/build_1a1_decomposition.py objective.json decomposition.json`
-  2. `python3 scripts/validate_decomposition_json.py decomposition.json 23`
+  2. `python3 scripts/validate_decomposition_json.py decomposition.json 27`
   3. submit the validated payload once
 
 For this objective, the helper script output is the authoritative decomposition shape unless the live
@@ -90,7 +96,7 @@ Those stay in the harness.
 
 ## Hard Constraints
 
-1. Max 7 child tasks per objective unless an objective-specific exception is explicitly stated in the objective payload. Current approved exception: objective `4009e581-7231-4930-9a0d-b2b56b281d9e` may use **23** child tasks one time to keep parity contract authoring, exact-parity proof, separated contract families, schema foundation, repository boundary, storage exports, canonical writer, identity/correlation mapping, task/objective API emitter wiring, task/objective worker emitter wiring, separated release/activation/escalation emitter families, readback query work, readback API/proof work, durable duplicate prevention, bounded backfill, docs, and gate review semantically bounded instead of rebundling known-risk surfaces.
+1. Max 7 child tasks per objective unless an objective-specific exception is explicitly stated in the objective payload. Current approved exception: objective `4009e581-7231-4930-9a0d-b2b56b281d9e` may use **27** child tasks one time: **26 execution slices plus 1 gate-review task**. This preserves parity contract authoring, exact-parity proof, separated contract families, separate schema-model and migration roots, repository boundary, storage exports, canonical writer, identity/correlation mapping, separate task API and objective API emitter roots, separate worker-handler and readiness/promotion roots, separated release/activation/escalation emitter families, readback query work, readback API/proof work, durable duplicate prevention, bounded backfill, docs, and gate review as semantically bounded surfaces instead of rebundling known-risk work.
    - count **all** emitted child tasks against this cap:
      - execution tasks
      - documentation tasks
@@ -104,13 +110,15 @@ Those stay in the harness.
 2. Every task must be completable by one agent in a focused pass, usually <=4 hours.
 3. Every task must have:
    - `title`
-   - `summary`
    - `assignee`
    - `priority`
-   - `acceptanceCriteria`
-   - `constraints`
-   - `relatedFiles`
    - `nextAction`
+   - `taskContract` for `4009e581-7231-4930-9a0d-b2b56b281d9e`
+
+For `4009e581-7231-4930-9a0d-b2b56b281d9e`, Mission Control compiles `summary`,
+`acceptanceCriteria`, `constraints`, `relatedFiles`, `artifactPaths`, and
+`dependsOn` from `taskContract`. Do not author those as the canary payload's
+source of truth.
 
 Historical-task reuse rule:
 
@@ -144,42 +152,47 @@ Objective-exception execution-order rule:
   payload or direct operator instruction, not Bernard's decomposition turn
 - if a neighboring pair still conflicts after the direct 1:1 mapping, identify the exact conflict
   and fix only that edge; do not reopen the whole exception graph conceptually
-- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the approved 23-slice list is an execution-order
+- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the approved 26 execution slices plus final gate review are the execution-order
   contract, not a brainstorming prompt
 - for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the objective payload is successfully read and no
   hard split-rule conflict is found, emit the task graph directly. Do not spend extra decomposition
   turns "thinking through" whether the named slices are still the right plan.
 - for `4009e581-7231-4930-9a0d-b2b56b281d9e`, do not open a todo plan or freehand the payload once
   the objective is read. Use the deterministic helper path, validate once, and submit once.
-- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the expected ordered slices are:
+- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, the expected ordered task list is:
   1. minimal task/objective parity contract authoring
   2. exact-parity proof for task/objective workflow contract behavior
   3. task/objective workflow contract taxonomy
-  4. release contract taxonomy
-  5. activation contract taxonomy
-  6. escalation contract taxonomy
-  7. LedgerEvent Prisma schema foundation
-  8. repository boundary
-  9. storage exports
-  10. canonical ledger writer
-  11. stable identity/correlation mapping
-  12. task/objective API entrypoint emitter wiring
-  13. task/objective worker transition emitter wiring
-  14. release-start emitter wiring
-  15. merge/deploy/verify emitter wiring
-  16. activation emitter wiring
-  17. escalation emitter wiring
-  18. deterministic readback query work
-  19. readback API and proof
-  20. durable duplicate prevention hardening
-  21. bounded backfill
-  22. docs
-  23. gate review
+  4. release workflow contract taxonomy
+  5. activation workflow contract taxonomy
+  6. escalation workflow contract taxonomy
+  7. LedgerEvent Prisma schema model foundation
+  8. LedgerEvent Prisma migration scaffold
+  9. LedgerEvent repository boundary
+  10. LedgerEvent storage exports
+  11. canonical ledger writer
+  12. stable identity/correlation mapping for ledger writes
+  13. task API entrypoint emitter wiring
+  14. objective API entrypoint emitter wiring
+  15. worker handler transition emitter wiring
+  16. readiness/promotion transition emitter wiring
+  17. release-start emitter wiring
+  18. merge/runtime transition emitter wiring
+  19. deploy/verify emitter wiring
+  20. activation emitter wiring
+  21. escalation emitter wiring
+  22. deterministic ledger readback query work
+  23. ledger readback API and proof
+  24. replay/remediation duplicate prevention hardening
+  25. bounded recent ledger backfill
+  26. workflow-ledger docs and operator proof path
+  27. gate review
 - if one of those slices still cannot be emitted cleanly, stop and return the exact blocking slice
   conflict. Do not replace the list with a smaller "close enough" graph.
-- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the payload is read and the 23-slice list is
+- for `4009e581-7231-4930-9a0d-b2b56b281d9e`, once the payload is read and the 26-slice list is
   confirmed, do not open a todo plan, do not perform extra repo discovery, and do not spend extra
-  turns re-deriving the graph. Build the 23-task payload directly, validate it once, and submit it.
+  turns re-deriving the graph. Build the 27-task payload directly (26 execution slices + 1 gate review), validate it once, and submit it.
+
 4. Every code/product-system task should assign to `William` or `Codex`.
 5. Every documentation/research-only task should assign to `Librarian` if appropriate.
 6. Priority should inherit from the objective unless there is a clear reason to lower urgency.
@@ -298,16 +311,16 @@ Preferred Mission Control helper scripts:
   - validates the final `decomposition_result` payload before the live POST
   - checks required fields, UUIDs, dependency references, gate-review count, gate-review coverage,
     and escaped globs
-  - for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, use max task count `23`
+  - for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, use max task count `27`
 - `scripts/build_1a1_decomposition.py objective.json decomposition.json`
   - deterministic builder for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`
-  - emits the approved 23-task graph directly from the live objective payload
+  - emits the approved 27-task graph directly from the live objective payload (26 execution slices + 1 gate review)
   - when the objective id matches `4009e581-7231-4930-9a0d-b2b56b281d9e`, use this builder instead
     of freehand payload construction
   - preferred path for this canary:
     1. fetch objective payload to `objective.json`
     2. run `python3 scripts/build_1a1_decomposition.py objective.json decomposition.json`
-    3. run `python3 scripts/validate_decomposition_json.py decomposition.json 23`
+    3. run `python3 scripts/validate_decomposition_json.py decomposition.json 27`
     4. submit the validated payload once
 
 Reason:
@@ -2375,7 +2388,7 @@ If any answer is “no,” the task is too broad or mis-shaped.
 
 Check:
 
-- 3-7 tasks total unless an objective-specific approved exception is in force; for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, **21** tasks is valid and preferred over re-bundling semantic-risk work
+- 3-7 tasks total unless an objective-specific approved exception is in force; for objective `4009e581-7231-4930-9a0d-b2b56b281d9e`, **24** tasks is valid and preferred over re-bundling semantic-risk work
 - each task has one bounded output
 - no task is open-ended
 - no task asks William to do harness-owned release work

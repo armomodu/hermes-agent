@@ -14,13 +14,16 @@ SLICE_TITLES = [
     "Define release workflow contract taxonomy",
     "Define activation workflow contract taxonomy",
     "Define escalation workflow contract taxonomy",
-    "Establish LedgerEvent Prisma schema foundation",
+    "Establish LedgerEvent Prisma schema model foundation",
+    "Create LedgerEvent Prisma migration scaffold",
     "Define LedgerEvent repository boundary",
     "Wire LedgerEvent storage exports",
     "Implement canonical ledger writer",
     "Harden stable identity/correlation mapping for ledger writes",
-    "Wire task/objective API entrypoint emitters to the canonical ledger path",
-    "Wire task/objective worker transition emitters to the canonical ledger path",
+    "Wire task API entrypoint emitters to the canonical ledger path",
+    "Wire objective API entrypoint emitters to the canonical ledger path",
+    "Wire worker handler transition emitters to the canonical ledger path",
+    "Wire readiness/promotion transition emitters to the canonical ledger path",
     "Wire release-start emitters to the canonical ledger path",
     "Wire merge/runtime transition emitters to the canonical ledger path",
     "Wire deploy/verify emitters to the canonical ledger path",
@@ -32,6 +35,10 @@ SLICE_TITLES = [
     "Backfill a bounded recent slice into the ledger",
     "Document the workflow-ledger contract and operator proof path",
 ]
+
+APPROVED_EXECUTION_SLICE_COUNT = 26
+APPROVED_MAX_TASK_COUNT = 27
+CANARY_OBJECTIVE_ID = "4009e581-7231-4930-9a0d-b2b56b281d9e"
 
 
 def new_id() -> str:
@@ -146,6 +153,14 @@ def validate_bounded_graph(tasks: list[dict]) -> None:
             has_worker_files = any("/src/lib/workers/" in path for path in related_files)
             if has_api_entrypoints and has_worker_files:
                 errors.append(f"{title}: task/objective emitter task mixes API entrypoints and worker transition files")
+        if "wire task api entrypoint emitters" in title_lower and any("/src/app/api/objectives/" in path for path in related_files):
+            errors.append(f"{title}: task API slice must not keep objective API writable")
+        if "wire objective api entrypoint emitters" in title_lower and any("/src/app/api/tasks/" in path for path in related_files):
+            errors.append(f"{title}: objective API slice must not keep task API writable")
+        if "wire worker handler transition emitters" in title_lower and any("task-readiness-promotion-service.ts" in path for path in related_files):
+            errors.append(f"{title}: worker handler slice must not keep readiness/promotion writable")
+        if "wire readiness/promotion transition emitters" in title_lower and any("handlers.ts" in path for path in related_files):
+            errors.append(f"{title}: readiness/promotion slice must not keep worker handler writable")
 
         if "contract taxonomy" in title.lower():
             invalid = [
@@ -186,8 +201,26 @@ def validate_bounded_graph(tasks: list[dict]) -> None:
         if missing_proof_scope:
             errors.append(f"{title}: proof depends on upstream authority outside writable scope {missing_proof_scope}")
 
+        candidate_writable_files = infer_writable_files(task, infer_proof_file(task))
+        writable_clusters = sorted(
+            {
+                cluster
+                for cluster in (classify_live_writable_cluster(path) for path in candidate_writable_files)
+                if cluster
+            }
+        )
+        if len(writable_clusters) > 1:
+            errors.append(
+                f"{title}: writable scope still spans multiple live writable clusters {writable_clusters}; "
+                "narrow the writable scope or move preserve-only authority into read-only metadata"
+            )
+
     if errors:
         raise SystemExit("bounded-graph validation failed:\n- " + "\n- ".join(errors))
+
+
+def sanitize_tasks(tasks: list[dict]) -> list[dict]:
+    return [to_contract_mode_task(task) for task in tasks]
 
 
 def slugify(value: str) -> str:
@@ -262,14 +295,45 @@ def overlaps(left: str, right: str) -> bool:
     return left_norm == right_norm or left_norm.startswith(right_norm + "/") or right_norm.startswith(left_norm + "/")
 
 
-def infer_read_only_anchors(task: dict) -> list[str]:
-    writable = [entry for entry in task.get("relatedFiles", []) if isinstance(entry, str)]
+def classify_live_writable_cluster(path: str) -> str | None:
+    cleaned = path.replace("**", "").rstrip("/")
+    if cleaned == "apps/mission-control/prisma/schema.prisma":
+        return "apps/mission-control/prisma/schema.prisma"
+    if cleaned.startswith("apps/mission-control/prisma/migrations"):
+        return "apps/mission-control/prisma/migrations"
+    if cleaned.startswith("apps/mission-control/src/app/api/tasks"):
+        return "apps/mission-control/src/app/api/tasks"
+    if cleaned.startswith("apps/mission-control/src/app/api/objectives"):
+        return "apps/mission-control/src/app/api/objectives"
+    if cleaned == "apps/mission-control/src/lib/workers/handlers.ts":
+        return "apps/mission-control/src/lib/workers/handlers.ts"
+    if cleaned == "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts":
+        return "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts"
+    return None
+
+
+def infer_created_file_globs(task: dict, writable_files: list[str]) -> list[str]:
+    return []
+
+
+def infer_read_only_anchors(task: dict, writable_files: list[str], created_file_globs: list[str]) -> list[str]:
     artifact_paths = [entry for entry in task.get("artifactPaths", []) if isinstance(entry, str)]
+    related_files = [entry for entry in task.get("relatedFiles", []) if isinstance(entry, str)]
     anchors: list[str] = []
     for path in artifact_paths:
         if path.endswith(".md") or "/__tests__/" in path or "/docs/" in path:
             continue
-        if any(overlaps(path, writable_path) for writable_path in writable):
+        if any(overlaps(path, writable_path) for writable_path in writable_files):
+            continue
+        if any(overlaps(path, created_glob) for created_glob in created_file_globs):
+            continue
+        anchors.append(path)
+    for path in related_files:
+        if any(overlaps(path, writable_path) for writable_path in writable_files):
+            continue
+        if any(overlaps(path, created_glob) for created_glob in created_file_globs):
+            continue
+        if "/__tests__/" in path:
             continue
         anchors.append(path)
     deduped: list[str] = []
@@ -297,10 +361,35 @@ def infer_output_artifact(task: dict) -> str:
 def infer_writable_files(task: dict, proof_file: str) -> list[str]:
     meta = task.get("__meta", {})
     parity_scope_mode = meta.get("parity_scope_mode")
+    title = task.get("title", "")
     related_files = [entry for entry in task.get("relatedFiles", []) if isinstance(entry, str)]
 
     if parity_scope_mode == "proof_only":
         return [proof_file]
+
+    scope_overrides = {
+        "Establish LedgerEvent Prisma schema model foundation": [
+            "apps/mission-control/prisma/schema.prisma",
+        ],
+        "Create LedgerEvent Prisma migration scaffold": [
+            "apps/mission-control/prisma/migrations/**",
+        ],
+        "Wire task API entrypoint emitters to the canonical ledger path": [
+            "apps/mission-control/src/app/api/tasks/route.ts",
+            "apps/mission-control/src/app/api/tasks/[id]/route.ts",
+        ],
+        "Wire objective API entrypoint emitters to the canonical ledger path": [
+            "apps/mission-control/src/app/api/objectives/[id]/route.ts",
+        ],
+        "Wire worker handler transition emitters to the canonical ledger path": [
+            "apps/mission-control/src/lib/workers/handlers.ts",
+        ],
+        "Wire readiness/promotion transition emitters to the canonical ledger path": [
+            "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts",
+        ],
+    }
+    if title in scope_overrides:
+        return list(scope_overrides[title])
 
     writable = [entry for entry in related_files if "/__tests__/" not in entry]
     deduped: list[str] = []
@@ -322,16 +411,18 @@ def to_contract_mode_task(task: dict) -> dict:
         title=task["title"],
     )
     proof_file = infer_proof_file(task)
+    writable_files = infer_writable_files(task, proof_file)
+    created_file_globs = infer_created_file_globs(task, writable_files)
     task_contract = {
         "version": "task-contract.v1",
         "semanticHinge": task["title"],
         "workflowFamily": family,
         "primaryArtifactClass": primary_artifact_class,
         "riskClass": normalize_risk_class(task["title"], primary_artifact_class),
-        "writableFiles": infer_writable_files(task, proof_file),
+        "writableFiles": writable_files,
         "proofFiles": [proof_file],
-        "createdFileGlobs": [],
-        "readOnlyAnchors": infer_read_only_anchors(task),
+        "createdFileGlobs": created_file_globs,
+        "readOnlyAnchors": infer_read_only_anchors(task, writable_files, created_file_globs),
         "outputArtifacts": [infer_output_artifact(task)],
         "provides": [f"task:{task['id']}"],
         "consumes": [f"task:{dep}" for dep in task.get("dependsOn", [])],
@@ -358,20 +449,21 @@ def to_contract_mode_task(task: dict) -> dict:
     return payload
 
 
-def sanitize_tasks(tasks: list[dict]) -> list[dict]:
-    return [to_contract_mode_task(task) for task in tasks]
-
-
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: build_1a1_decomposition.py <objective.json> <decomposition.json>", file=sys.stderr)
         return 2
 
+    if len(SLICE_TITLES) != APPROVED_EXECUTION_SLICE_COUNT:
+        raise SystemExit(
+            f"expected {APPROVED_EXECUTION_SLICE_COUNT} execution slices, found {len(SLICE_TITLES)}"
+        )
+
     objective_path = Path(sys.argv[1])
     out_path = Path(sys.argv[2])
     objective = json.loads(objective_path.read_text(encoding="utf-8"))
 
-    if objective.get("id") != "4009e581-7231-4930-9a0d-b2b56b281d9e":
+    if objective.get("id") != CANARY_OBJECTIVE_ID:
         print("unexpected objective id", file=sys.stderr)
         return 2
 
@@ -403,8 +495,10 @@ def main() -> int:
     activation_emitter_paths = [
         "apps/mission-control/src/lib/release/objective-activation-service.ts",
     ]
-    schema_paths = [
+    schema_model_paths = [
         "apps/mission-control/prisma/schema.prisma",
+    ]
+    schema_migration_paths = [
         "apps/mission-control/prisma/migrations/**",
     ]
     storage_foundation_paths = [
@@ -569,27 +663,49 @@ def main() -> int:
 
     t4 = make_task(
         title=SLICE_TITLES[6],
-        summary="Lay down the LedgerEvent Prisma schema foundation for durable workflow event storage before any storage or ledger implementation begins.",
+        summary="Lay down the LedgerEvent Prisma schema model foundation for durable workflow event storage before any storage or ledger implementation begins.",
         acceptance=text(
-            "The LedgerEvent schema foundation is defined in Prisma with migration-safe IDs and correlation fields.",
+            "The LedgerEvent schema model is defined in Prisma with migration-safe IDs and correlation fields.",
             "The schema does not bundle runtime write-path behavior or duplicate-prevention logic.",
             "Schema validation passes.",
         ),
         constraints=text(
-            "Schema foundation only.",
-            "Do not implement repository writes or readback queries here.",
+            "Schema-model foundation only.",
+            "Do not author migration files, repository writes, or readback queries here.",
         ),
-        related_files=schema_paths,
-        artifact_paths=["apps/mission-control/prisma/schema.prisma", "apps/mission-control/prisma/migrations/**"],
-        next_action="Define the durable event schema and migration foundation before any write-path wiring.",
+        related_files=schema_model_paths,
+        artifact_paths=["apps/mission-control/prisma/schema.prisma", *schema_migration_paths],
+        next_action="Define the durable event schema model before any migration, repository, or write-path wiring.",
         workflow_families=["ledger-schema"],
         abstraction_classes=["schema model or migration slice"],
         primary_artifact_class="schema model or migration slice",
     )
     tasks.append(t4)
 
-    t5 = make_task(
+    t4b = make_task(
         title=SLICE_TITLES[7],
+        summary="Create the LedgerEvent Prisma migration scaffold over the established schema model without expanding into repository or runtime behavior.",
+        acceptance=text(
+            "A bounded LedgerEvent migration scaffold exists for the approved schema model.",
+            "The migration scaffold does not redesign the schema model or embed repository/runtime behavior.",
+            "Migration generation or validation passes for the scoped change.",
+        ),
+        constraints=text(
+            "Migration scaffold only.",
+            "Consume the approved schema model as read-only authority.",
+            "Do not implement repository writes or readback queries here.",
+        ),
+        related_files=schema_migration_paths,
+        artifact_paths=["apps/mission-control/prisma/schema.prisma", *schema_migration_paths],
+        next_action="Create the bounded LedgerEvent migration scaffold from the approved schema model.",
+        workflow_families=["ledger-schema"],
+        abstraction_classes=["schema model or migration slice"],
+        primary_artifact_class="schema model or migration slice",
+    )
+    tasks.append(t4b)
+
+    t5 = make_task(
+        title=SLICE_TITLES[8],
         summary="Define the concrete LedgerEvent repository boundary over the established schema without taking on exports, writer logic, or duplicate handling yet.",
         acceptance=text(
             "A concrete LedgerEvent repository boundary exists for ledger events and consumes the established Prisma LedgerEvent schema as read-only input.",
@@ -603,9 +719,9 @@ def main() -> int:
             "Do not wire storage exports, implement the canonical writer, emitter wiring, or duplicate prevention here.",
         ),
         related_files=storage_foundation_paths,
-        artifact_paths=["apps/mission-control/src/lib/storage/**", *schema_paths],
+        artifact_paths=["apps/mission-control/src/lib/storage/**", *schema_model_paths, *schema_migration_paths],
         next_action="Define the concrete repository boundary that later storage-export and writer tasks will call.",
-        depends_on=[t4["id"]],
+        depends_on=[t4["id"], t4b["id"]],
         workflow_families=["ledger-storage"],
         abstraction_classes=["repository boundary"],
         primary_artifact_class="repository boundary",
@@ -613,7 +729,7 @@ def main() -> int:
     tasks.append(t5)
 
     t5b = make_task(
-        title=SLICE_TITLES[8],
+        title=SLICE_TITLES[9],
         summary="Wire the LedgerEvent storage export surface over the established repository boundary without taking on writer logic or duplicate handling.",
         acceptance=text(
             "The LedgerEvent storage export surface is explicit and stable for downstream ledger tasks.",
@@ -638,7 +754,7 @@ def main() -> int:
     tasks.append(t5b)
 
     t6 = make_task(
-        title=SLICE_TITLES[9],
+        title=SLICE_TITLES[10],
         summary="Implement the canonical ledger writer over the existing storage export surface without taking on identity/correlation hardening or duplicate handling yet.",
         acceptance=text(
             "A single canonical ledger writer exists over the established storage export surface.",
@@ -663,7 +779,7 @@ def main() -> int:
     tasks.append(t6)
 
     t6b = make_task(
-        title=SLICE_TITLES[10],
+        title=SLICE_TITLES[11],
         summary="Harden stable event identity and correlation mapping for ledger writes over the existing canonical writer.",
         acceptance=text(
             "Stable event identity and correlation mapping is enforced on the ledger write path.",
@@ -688,28 +804,28 @@ def main() -> int:
     tasks.append(t6b)
 
     t7 = make_task(
-        title=SLICE_TITLES[11],
-        summary="Wire direct task/objective API mutation entrypoints to the canonical ledger path using the already-authored task/objective contract family.",
+        title=SLICE_TITLES[12],
+        summary="Wire direct task API mutation entrypoints to the canonical ledger path using the already-authored task/objective contract family.",
         acceptance=text(
-            "Direct task/objective API mutation entrypoints emit through the canonical ledger path.",
+            "Direct task API mutation entrypoints emit through the canonical ledger path.",
             "Emitter wiring consumes the pre-authored contract family instead of inventing it inline.",
-            "Focused tests prove the targeted API-entrypoint transitions emit the expected events.",
+            "Focused tests prove the targeted task API-entrypoint transitions emit the expected events.",
         ),
         constraints=text(
-            "Task/objective API-entrypoint emitter slice only.",
-            "Do not wire worker transition/promotion files, release, activation, or escalation surfaces here.",
+            "Task API-entrypoint emitter slice only.",
+            "Do not wire objective API routes, worker transition/promotion files, release, activation, or escalation surfaces here.",
         ),
         related_files=[
             "apps/mission-control/src/app/api/tasks/route.ts",
             "apps/mission-control/src/app/api/tasks/[id]/route.ts",
-            "apps/mission-control/src/app/api/objectives/[id]/route.ts",
         ],
         artifact_paths=[
             "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
             "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+            "apps/mission-control/src/app/api/objectives/[id]/route.ts",
         ],
-        next_action="Wire only the direct task/objective API mutation entrypoints to the canonical writer and prove them with focused tests.",
+        next_action="Wire only the direct task API mutation entrypoints to the canonical writer and prove them with focused tests.",
         depends_on=[t2["id"], t6["id"], t6b["id"]],
         workflow_families=["task/objective"],
         abstraction_classes=["emitter-wiring slice"],
@@ -718,27 +834,28 @@ def main() -> int:
     tasks.append(t7)
 
     t7b = make_task(
-        title=SLICE_TITLES[12],
-        summary="Wire worker-driven task/objective transition and promotion paths to the canonical ledger path using the already-authored task/objective contract family.",
+        title=SLICE_TITLES[13],
+        summary="Wire direct objective API mutation entrypoints to the canonical ledger path using the already-authored task/objective contract family.",
         acceptance=text(
-            "Worker-driven task/objective transition and promotion behavior emits through the canonical ledger path.",
+            "Direct objective API mutation entrypoints emit through the canonical ledger path.",
             "Emitter wiring consumes the pre-authored contract family instead of inventing it inline.",
-            "Focused tests prove the targeted worker-transition behavior emits the expected events.",
+            "Focused tests prove the targeted objective API-entrypoint transitions emit the expected events.",
         ),
         constraints=text(
-            "Task/objective worker-transition emitter slice only.",
-            "Do not wire direct API mutation entrypoints, release, activation, or escalation surfaces here.",
+            "Objective API-entrypoint emitter slice only.",
+            "Do not wire task API routes, worker transition/promotion files, release, activation, or escalation surfaces here.",
         ),
         related_files=[
-            "apps/mission-control/src/lib/workers/handlers.ts",
-            "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts",
+            "apps/mission-control/src/app/api/objectives/[id]/route.ts",
         ],
         artifact_paths=[
             "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
             "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+            "apps/mission-control/src/app/api/tasks/route.ts",
+            "apps/mission-control/src/app/api/tasks/[id]/route.ts",
         ],
-        next_action="Wire only the worker-driven task/objective transition paths to the canonical writer and prove them with focused tests.",
+        next_action="Wire only the direct objective API mutation entrypoints to the canonical writer and prove them with focused tests.",
         depends_on=[t2["id"], t6["id"], t6b["id"]],
         workflow_families=["task/objective"],
         abstraction_classes=["emitter-wiring slice"],
@@ -746,8 +863,66 @@ def main() -> int:
     )
     tasks.append(t7b)
 
+    t7c = make_task(
+        title=SLICE_TITLES[14],
+        summary="Wire worker handler task/objective transition paths to the canonical ledger path using the already-authored task/objective contract family.",
+        acceptance=text(
+            "Worker handler task/objective transition behavior emits through the canonical ledger path.",
+            "Emitter wiring consumes the pre-authored contract family instead of inventing it inline.",
+            "Focused tests prove the targeted worker-handler transition behavior emits the expected events.",
+        ),
+        constraints=text(
+            "Worker handler emitter slice only.",
+            "Do not wire readiness/promotion, direct API mutation entrypoints, release, activation, or escalation surfaces here.",
+        ),
+        related_files=[
+            "apps/mission-control/src/lib/workers/handlers.ts",
+        ],
+        artifact_paths=[
+            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
+            "apps/mission-control/src/lib/knowledge-plane/ledger/**",
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+            "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts",
+        ],
+        next_action="Wire only the worker handler transition paths to the canonical writer and prove them with focused tests.",
+        depends_on=[t2["id"], t6["id"], t6b["id"]],
+        workflow_families=["task/objective"],
+        abstraction_classes=["emitter-wiring slice"],
+        primary_artifact_class="emitter-wiring slice",
+    )
+    tasks.append(t7c)
+
+    t7d = make_task(
+        title=SLICE_TITLES[15],
+        summary="Wire readiness/promotion task progression paths to the canonical ledger path using the already-authored task/objective contract family.",
+        acceptance=text(
+            "Readiness and promotion task/objective transition behavior emits through the canonical ledger path.",
+            "Emitter wiring consumes the pre-authored contract family instead of inventing it inline.",
+            "Focused tests prove the targeted readiness/promotion transition behavior emits the expected events.",
+        ),
+        constraints=text(
+            "Readiness/promotion emitter slice only.",
+            "Do not wire worker handlers, direct API mutation entrypoints, release, activation, or escalation surfaces here.",
+        ),
+        related_files=[
+            "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts",
+        ],
+        artifact_paths=[
+            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
+            "apps/mission-control/src/lib/knowledge-plane/ledger/**",
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+            "apps/mission-control/src/lib/workers/handlers.ts",
+        ],
+        next_action="Wire only the readiness/promotion transition paths to the canonical writer and prove them with focused tests.",
+        depends_on=[t2["id"], t6["id"], t6b["id"]],
+        workflow_families=["task/objective"],
+        abstraction_classes=["emitter-wiring slice"],
+        primary_artifact_class="emitter-wiring slice",
+    )
+    tasks.append(t7d)
+
     t8 = make_task(
-        title=SLICE_TITLES[13],
+        title=SLICE_TITLES[16],
         summary="Wire release-start events to the canonical ledger path using the already-authored release contract family.",
         acceptance=text(
             "Release-start runtime behavior emits the expected ledger events through the canonical writer.",
@@ -770,7 +945,7 @@ def main() -> int:
     tasks.append(t8)
 
     t9 = make_task(
-        title=SLICE_TITLES[14],
+        title=SLICE_TITLES[17],
         summary="Wire merge/runtime transition events to the canonical ledger path using the already-authored release contract family.",
         acceptance=text(
             "Merge/runtime transition behavior emits through the canonical writer.",
@@ -793,7 +968,7 @@ def main() -> int:
     tasks.append(t9)
 
     t10 = make_task(
-        title=SLICE_TITLES[15],
+        title=SLICE_TITLES[18],
         summary="Wire deploy/verify runtime events to the canonical ledger path using the already-authored release contract family.",
         acceptance=text(
             "Deploy/verify runtime behavior emits through the canonical writer.",
@@ -816,7 +991,7 @@ def main() -> int:
     tasks.append(t10)
 
     t11 = make_task(
-        title=SLICE_TITLES[16],
+        title=SLICE_TITLES[19],
         summary="Wire activation runtime events to the canonical ledger path using the already-authored activation contract family.",
         acceptance=text(
             "Activation runtime behavior emits through the canonical writer.",
@@ -839,7 +1014,7 @@ def main() -> int:
     tasks.append(t11)
 
     t12 = make_task(
-        title=SLICE_TITLES[17],
+        title=SLICE_TITLES[20],
         summary="Wire escalation runtime events to the canonical ledger path using the already-authored escalation contract family.",
         acceptance=text(
             "Escalation runtime behavior emits through the canonical writer.",
@@ -864,7 +1039,7 @@ def main() -> int:
     tasks.append(t12)
 
     t13 = make_task(
-        title=SLICE_TITLES[18],
+        title=SLICE_TITLES[21],
         summary="Implement the deterministic ledger readback query surface over the persisted ledger events.",
         acceptance=text(
             "Deterministic readback queries exist for objective, task, agent, and event-type access patterns.",
@@ -883,7 +1058,7 @@ def main() -> int:
     tasks.append(t13)
 
     t14 = make_task(
-        title=SLICE_TITLES[19],
+        title=SLICE_TITLES[22],
         summary="Expose ledger readback through the API surface and prove the readback contract end to end.",
         acceptance=text(
             "Ledger readback API routes exist and consume the deterministic query layer.",
@@ -902,7 +1077,7 @@ def main() -> int:
     tasks.append(t14)
 
     t15 = make_task(
-        title=SLICE_TITLES[20],
+        title=SLICE_TITLES[23],
         summary="Harden replay/remediation duplicate prevention so retries, replay, remediation loops, and repeated writes do not create incorrect duplicate ledger writes.",
         acceptance=text(
             "Duplicate prevention is enforced on the ledger write path for the relevant retry/replay surfaces.",
@@ -926,7 +1101,7 @@ def main() -> int:
     tasks.append(t15)
 
     t16 = make_task(
-        title=SLICE_TITLES[21],
+        title=SLICE_TITLES[24],
         summary="Backfill a bounded recent slice of factory workflow history into the ledger without expanding into full retrieval or synthesis work.",
         acceptance=text(
             "A bounded recent backfill path exists for the intended workflow slice.",
@@ -947,7 +1122,7 @@ def main() -> int:
     tasks.append(t16)
 
     t17 = make_task(
-        title=SLICE_TITLES[22],
+        title=SLICE_TITLES[25],
         summary="Document the workflow-ledger contract, operator proof path, and objective-local scope boundaries for this phase.",
         acceptance=text(
             "Repo-local knowledge-plane documentation captures the workflow-ledger contract and proof surfaces introduced by this objective.",
@@ -960,8 +1135,8 @@ def main() -> int:
         next_action="Write the scoped workflow-ledger docs after the runtime surfaces are in place.",
         assignee="Librarian",
         depends_on=[
-            t1["id"], t1b["id"], t2["id"], t3["id"], t3b["id"], t3c["id"], t4["id"], t5["id"],
-            t5b["id"], t6["id"], t6b["id"], t7["id"], t7b["id"], t8["id"], t9["id"], t10["id"],
+            t1["id"], t1b["id"], t2["id"], t3["id"], t3b["id"], t3c["id"], t4["id"], t4b["id"], t5["id"],
+            t5b["id"], t6["id"], t6b["id"], t7["id"], t7b["id"], t7c["id"], t7d["id"], t8["id"], t9["id"], t10["id"],
             t11["id"], t12["id"], t13["id"], t14["id"], t15["id"], t16["id"],
         ],
         workflow_families=["docs"],
@@ -1004,13 +1179,18 @@ def main() -> int:
     )
     tasks.append(t18)
 
+    if len(tasks) != APPROVED_MAX_TASK_COUNT:
+        raise SystemExit(
+            f"expected {APPROVED_MAX_TASK_COUNT} total tasks (26 execution slices + 1 gate review), found {len(tasks)}"
+        )
+
     validate_bounded_graph(tasks)
     payload = {
         "kind": "decomposition_result",
         "objectiveId": objective["id"],
         "actor": "Bernard",
         "requestReview": True,
-        "statusNote": "Decomposed 1A.1 into bounded single-family slices with dedicated gate review.",
+        "statusNote": "Decomposed 1A.1 into 27 bounded single-root slices with dedicated gate review.",
         "tasks": sanitize_tasks(tasks),
     }
 

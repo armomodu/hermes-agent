@@ -34,29 +34,38 @@ CONTRACT_MODE_REQUIRED_TASK_FIELDS = (
 
 
 def classify_writable_cluster(path: str) -> str | None:
-    if "/src/lib/knowledge-plane/contracts/" in path:
+    cleaned = path.replace("**", "").rstrip("/")
+    if "/src/lib/knowledge-plane/contracts/" in cleaned:
         return "contracts"
-    if "/src/lib/knowledge-plane/ledger/" in path:
+    if "/src/lib/knowledge-plane/ledger/" in cleaned:
         return "ledger"
-    if "/src/lib/storage/" in path or "/prisma/" in path:
+    if cleaned == "apps/mission-control/prisma/schema.prisma":
+        return "apps/mission-control/prisma/schema.prisma"
+    if cleaned.startswith("apps/mission-control/prisma/migrations"):
+        return "apps/mission-control/prisma/migrations"
+    if "/src/lib/storage/" in cleaned:
         return "storage"
-    if "/src/app/api/tasks/" in path or "/src/app/api/objectives/" in path:
-        return "task-objective-api"
-    if "/src/lib/workers/handlers.ts" in path or "/task-readiness-promotion-service.ts" in path:
-        return "task-objective-workers"
-    if "/src/app/api/knowledge/ledger/" in path:
+    if cleaned.startswith("apps/mission-control/src/app/api/tasks"):
+        return "apps/mission-control/src/app/api/tasks"
+    if cleaned.startswith("apps/mission-control/src/app/api/objectives"):
+        return "apps/mission-control/src/app/api/objectives"
+    if cleaned == "apps/mission-control/src/lib/workers/handlers.ts":
+        return "apps/mission-control/src/lib/workers/handlers.ts"
+    if cleaned == "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts":
+        return "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts"
+    if "/src/app/api/knowledge/ledger/" in cleaned:
         return "knowledge-ledger-api"
-    if "/src/lib/release/objective-release-service.ts" in path:
+    if "/src/lib/release/objective-release-service.ts" in cleaned:
         return "release-runtime"
-    if "/src/lib/release/objective-deployment-service.ts" in path:
+    if "/src/lib/release/objective-deployment-service.ts" in cleaned:
         return "deploy-verify-runtime"
-    if "/src/lib/release/objective-activation-service.ts" in path:
+    if "/src/lib/release/objective-activation-service.ts" in cleaned:
         return "activation-runtime"
-    if "/src/lib/workers/escalation-events.ts" in path:
+    if "/src/lib/workers/escalation-events.ts" in cleaned:
         return "escalation-runtime"
-    if "/src/lib/workers/idempotency.ts" in path:
+    if "/src/lib/workers/idempotency.ts" in cleaned:
         return "duplicate-prevention-runtime"
-    if "/docs/" in path:
+    if "/docs/" in cleaned:
         return "docs"
     return None
 
@@ -117,7 +126,7 @@ def main() -> int:
         task_id = task["id"]
         try:
             uuid.UUID(task_id)
-        except Exception as exc:
+        except Exception as exc:  # pragma: no cover - defensive
             return fail(f"invalid UUID {task_id}: {exc}")
 
         if task_id in task_ids:
