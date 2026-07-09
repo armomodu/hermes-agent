@@ -190,8 +190,176 @@ def validate_bounded_graph(tasks: list[dict]) -> None:
         raise SystemExit("bounded-graph validation failed:\n- " + "\n- ".join(errors))
 
 
+def slugify(value: str) -> str:
+    slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in value).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug or "task"
+
+
+def normalize_family(value: str | None) -> str:
+    mapping = {
+        "task/objective": "task_objective",
+        "release": "merge_deploy_verify",
+        "activation": "activation",
+        "escalation": "escalation",
+        "ledger-schema": "storage",
+        "ledger-storage": "storage",
+        "ledger-writer": "storage",
+        "readback": "storage",
+        "duplicate-prevention": "storage",
+        "backfill": "storage",
+        "docs": "docs",
+    }
+    return mapping.get((value or "").strip(), "storage")
+
+
+def normalize_primary_artifact(value: str | None, *, task_type: str, title: str) -> str:
+    if task_type == "review":
+        return "review_gate"
+    title_lower = title.lower()
+    mapping = {
+        "contract parity slice": "contract_family",
+        "focused proof slice": "contract_family",
+        "contract family": "contract_family",
+        "schema model or migration slice": "schema_model",
+        "repository boundary": "repository_boundary",
+        "storage export surface": "repository_boundary",
+        "canonical writer": "writer",
+        "identity/correlation mapping surface": "writer",
+        "emitter-wiring slice": "emitter_wiring",
+        "deterministic query surface": "readback_query",
+        "api readback surface": "readback_api",
+        "duplicate-prevention surface": "duplicate_prevention",
+        "bounded backfill surface": "backfill",
+        "docs": "docs",
+    }
+    if value and value.strip() in mapping:
+        return mapping[value.strip()]
+    if "schema" in title_lower:
+        return "schema_model"
+    if "review" in title_lower:
+        return "review_gate"
+    return "writer"
+
+
+def normalize_risk_class(title: str, primary_artifact_class: str) -> str:
+    title_lower = title.lower()
+    if "exact parity" in title_lower or "parity contract" in title_lower:
+        return "exact_parity"
+    if primary_artifact_class in {"schema_model", "repository_boundary", "writer", "duplicate_prevention", "backfill"}:
+        return "persistence"
+    if primary_artifact_class in {"emitter_wiring", "readback_api"}:
+        return "runtime_wiring"
+    if primary_artifact_class == "review_gate":
+        return "canary"
+    return "normal"
+
+
+def overlaps(left: str, right: str) -> bool:
+    left_norm = left.replace("**", "").rstrip("/")
+    right_norm = right.replace("**", "").rstrip("/")
+    return left_norm == right_norm or left_norm.startswith(right_norm + "/") or right_norm.startswith(left_norm + "/")
+
+
+def infer_read_only_anchors(task: dict) -> list[str]:
+    writable = [entry for entry in task.get("relatedFiles", []) if isinstance(entry, str)]
+    artifact_paths = [entry for entry in task.get("artifactPaths", []) if isinstance(entry, str)]
+    anchors: list[str] = []
+    for path in artifact_paths:
+        if path.endswith(".md") or "/__tests__/" in path or "/docs/" in path:
+            continue
+        if any(overlaps(path, writable_path) for writable_path in writable):
+            continue
+        anchors.append(path)
+    deduped: list[str] = []
+    seen = set()
+    for path in anchors:
+        if path in seen:
+            continue
+        seen.add(path)
+        deduped.append(path)
+    return deduped
+
+
+def infer_proof_file(task: dict) -> str:
+    slug = slugify(task["title"])
+    if task.get("assignee") == "Librarian":
+        return f"apps/mission-control/docs/knowledge-plane/proof/{slug}.md"
+    return f"apps/mission-control/src/lib/knowledge-plane/__tests__/canary/{slug}.test.ts"
+
+
+def infer_output_artifact(task: dict) -> str:
+    slug = slugify(task["title"])
+    return f"artifacts/decomposition/1a1/{slug}.md"
+
+
+def infer_writable_files(task: dict, proof_file: str) -> list[str]:
+    meta = task.get("__meta", {})
+    parity_scope_mode = meta.get("parity_scope_mode")
+    related_files = [entry for entry in task.get("relatedFiles", []) if isinstance(entry, str)]
+
+    if parity_scope_mode == "proof_only":
+        return [proof_file]
+
+    writable = [entry for entry in related_files if "/__tests__/" not in entry]
+    deduped: list[str] = []
+    seen = set()
+    for path in writable:
+        if path in seen:
+            continue
+        seen.add(path)
+        deduped.append(path)
+    return deduped
+
+
+def to_contract_mode_task(task: dict) -> dict:
+    meta = task.get("__meta", {})
+    family = normalize_family((meta.get("workflow_families") or [None])[0])
+    primary_artifact_class = normalize_primary_artifact(
+        meta.get("primary_artifact_class"),
+        task_type=task["taskType"],
+        title=task["title"],
+    )
+    proof_file = infer_proof_file(task)
+    task_contract = {
+        "version": "task-contract.v1",
+        "semanticHinge": task["title"],
+        "workflowFamily": family,
+        "primaryArtifactClass": primary_artifact_class,
+        "riskClass": normalize_risk_class(task["title"], primary_artifact_class),
+        "writableFiles": infer_writable_files(task, proof_file),
+        "proofFiles": [proof_file],
+        "createdFileGlobs": [],
+        "readOnlyAnchors": infer_read_only_anchors(task),
+        "outputArtifacts": [infer_output_artifact(task)],
+        "provides": [f"task:{task['id']}"],
+        "consumes": [f"task:{dep}" for dep in task.get("dependsOn", [])],
+        "outOfScope": [],
+        "verification": {
+            "focusedTests": [proof_file],
+            "qualityGates": ["software_test"],
+        },
+    }
+    payload = {
+        "id": task["id"],
+        "title": task["title"],
+        "assignee": task["assignee"],
+        "taskType": task["taskType"],
+        "priority": task["priority"],
+        "feature": task["feature"],
+        "links": list(task.get("links", [])),
+        "nextAction": task["nextAction"],
+        "blockers": task.get("blockers"),
+        "taskContract": task_contract,
+    }
+    if task.get("reviewMode") is not None:
+        payload["reviewMode"] = task["reviewMode"]
+    return payload
+
+
 def sanitize_tasks(tasks: list[dict]) -> list[dict]:
-    return [{k: v for k, v in task.items() if k != "__meta"} for task in tasks]
+    return [to_contract_mode_task(task) for task in tasks]
 
 
 def main() -> int:
@@ -209,7 +377,6 @@ def main() -> int:
 
     parity_writable_paths = [
         "apps/mission-control/src/lib/knowledge-plane/contracts/**",
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
     parity_authority_paths = [
         "apps/mission-control/src/app/api/tasks/route.ts",
@@ -220,30 +387,21 @@ def main() -> int:
     ]
     contract_scope_paths = [
         "apps/mission-control/src/lib/knowledge-plane/contracts/**",
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
     release_contract_paths = contract_scope_paths
     activation_contract_paths = contract_scope_paths
     escalation_contract_paths = contract_scope_paths
     release_start_emitter_paths = [
         "apps/mission-control/src/lib/release/objective-release-service.ts",
-        "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
     merge_runtime_emitter_paths = [
         "apps/mission-control/src/lib/release/objective-release-service.ts",
-        "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
     deploy_verify_emitter_paths = [
         "apps/mission-control/src/lib/release/objective-deployment-service.ts",
-        "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
     activation_emitter_paths = [
         "apps/mission-control/src/lib/release/objective-activation-service.ts",
-        "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
     schema_paths = [
         "apps/mission-control/prisma/schema.prisma",
@@ -251,24 +409,18 @@ def main() -> int:
     ]
     storage_foundation_paths = [
         "apps/mission-control/src/lib/storage/**",
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
     ledger_write_paths = [
-        "apps/mission-control/src/lib/knowledge-plane/contracts/**",
         "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
     readback_paths = [
         "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
     docs_paths = [
         "apps/mission-control/docs/knowledge-plane/**",
     ]
     api_paths = [
         "apps/mission-control/src/app/api/knowledge/ledger/**",
-        "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
     ]
 
     tasks: list[dict] = []
@@ -309,7 +461,7 @@ def main() -> int:
             "Consume the authored minimal parity contract slice from the prior task without editing it.",
             "Do not widen into broader taxonomy, validators, or adjacent workflow families.",
         ),
-        related_files=["apps/mission-control/src/lib/knowledge-plane/__tests__/**"],
+        related_files=[],
         artifact_paths=["apps/mission-control/src/lib/knowledge-plane/contracts/**", *parity_authority_paths],
         next_action="Write the route-anchored proof against the authored parity slice using only proof-file writable scope.",
         depends_on=[t1["id"]],
@@ -475,7 +627,6 @@ def main() -> int:
         ),
         related_files=[
             "apps/mission-control/src/lib/storage/**",
-            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
         ],
         artifact_paths=["apps/mission-control/src/lib/storage/**"],
         next_action="Wire the stable storage export surface over the repository boundary before the canonical writer is introduced.",
@@ -501,7 +652,6 @@ def main() -> int:
         ),
         related_files=[
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
         ],
         artifact_paths=["apps/mission-control/src/lib/knowledge-plane/ledger/**"],
         next_action="Implement the canonical ledger writer over the established storage export surface before identity/correlation hardening and emitter tasks consume it.",
@@ -527,7 +677,6 @@ def main() -> int:
         ),
         related_files=[
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
         ],
         artifact_paths=["apps/mission-control/src/lib/knowledge-plane/ledger/**"],
         next_action="Harden stable event identity and correlation mapping over the existing canonical writer before downstream runtime families consume it.",
@@ -554,10 +703,12 @@ def main() -> int:
             "apps/mission-control/src/app/api/tasks/route.ts",
             "apps/mission-control/src/app/api/tasks/[id]/route.ts",
             "apps/mission-control/src/app/api/objectives/[id]/route.ts",
+        ],
+        artifact_paths=[
+            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
             "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
         ],
-        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/__tests__/**"],
         next_action="Wire only the direct task/objective API mutation entrypoints to the canonical writer and prove them with focused tests.",
         depends_on=[t2["id"], t6["id"], t6b["id"]],
         workflow_families=["task/objective"],
@@ -581,10 +732,12 @@ def main() -> int:
         related_files=[
             "apps/mission-control/src/lib/workers/handlers.ts",
             "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts",
+        ],
+        artifact_paths=[
+            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
             "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
         ],
-        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/__tests__/**"],
         next_action="Wire only the worker-driven task/objective transition paths to the canonical writer and prove them with focused tests.",
         depends_on=[t2["id"], t6["id"], t6b["id"]],
         workflow_families=["task/objective"],
@@ -603,7 +756,11 @@ def main() -> int:
         ),
         constraints=text("Release-start emitter family only.", "Do not bundle merge/deploy/verify, activation, or escalation here."),
         related_files=release_start_emitter_paths,
-        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/__tests__/**"],
+        artifact_paths=[
+            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
+            "apps/mission-control/src/lib/knowledge-plane/ledger/**",
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+        ],
         next_action="Wire only the release-start surfaces to the canonical ledger writer.",
         depends_on=[t3["id"], t6["id"], t6b["id"]],
         workflow_families=["release"],
@@ -622,7 +779,11 @@ def main() -> int:
         ),
         constraints=text("Merge/runtime transition emitter slice only.", "Do not bundle release-start, deploy/verify, activation, or escalation here."),
         related_files=merge_runtime_emitter_paths,
-        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/__tests__/**"],
+        artifact_paths=[
+            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
+            "apps/mission-control/src/lib/knowledge-plane/ledger/**",
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+        ],
         next_action="Wire only merge/runtime transition surfaces to the canonical ledger writer.",
         depends_on=[t3["id"], t6["id"], t6b["id"]],
         workflow_families=["release"],
@@ -641,7 +802,11 @@ def main() -> int:
         ),
         constraints=text("Deploy/verify emitter slice only.", "Do not bundle release-start, merge/runtime transition, activation, or escalation here."),
         related_files=deploy_verify_emitter_paths,
-        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/__tests__/**"],
+        artifact_paths=[
+            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
+            "apps/mission-control/src/lib/knowledge-plane/ledger/**",
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+        ],
         next_action="Wire only deploy/verify surfaces to the canonical ledger writer.",
         depends_on=[t3["id"], t6["id"], t6b["id"]],
         workflow_families=["release"],
@@ -660,7 +825,11 @@ def main() -> int:
         ),
         constraints=text("Activation emitter family only.", "Do not bundle release or escalation families here."),
         related_files=activation_emitter_paths,
-        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/__tests__/**"],
+        artifact_paths=[
+            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
+            "apps/mission-control/src/lib/knowledge-plane/ledger/**",
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+        ],
         next_action="Wire only activation surfaces to the canonical ledger writer.",
         depends_on=[t3b["id"], t6["id"], t6b["id"]],
         workflow_families=["activation"],
@@ -680,12 +849,11 @@ def main() -> int:
         constraints=text("Escalation emitter family only.", "Do not bundle task/objective, release, or activation families here."),
         related_files=[
             "apps/mission-control/src/lib/workers/escalation-events.ts",
-            "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
         ],
         artifact_paths=[
-            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
             "apps/mission-control/src/lib/knowledge-plane/contracts/**",
+            "apps/mission-control/src/lib/knowledge-plane/ledger/**",
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
         ],
         next_action="Wire only escalation surfaces to the canonical ledger writer.",
         depends_on=[t3c["id"], t6["id"], t6b["id"]],
@@ -744,10 +912,11 @@ def main() -> int:
         constraints=text("Duplicate-prevention hardening only.", "Do not bundle backfill or readback API work here."),
         related_files=[
             "apps/mission-control/src/lib/workers/idempotency.ts",
+        ],
+        artifact_paths=[
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
             "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
         ],
-        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/__tests__/**"],
         next_action="Harden the write path against duplicate creation under replay and retry paths.",
         depends_on=[t6["id"], t6b["id"]],
         workflow_families=["duplicate-prevention"],
@@ -767,7 +936,6 @@ def main() -> int:
         constraints=text("Bounded backfill only.", "Do not widen into long-term archaeology or semantic retrieval."),
         related_files=[
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
-            "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
         ],
         artifact_paths=["apps/mission-control/src/lib/knowledge-plane/ledger/**"],
         next_action="Implement the bounded workflow-history backfill over the hardened ledger write path.",
