@@ -1639,6 +1639,37 @@ Known preserve-only authority trap:
 - if Bernard cannot keep the proof honest without leaving preserve-only authority writable, split
   the proof task or emit the missing upstream provider task instead of expanding writable scope
 
+Review-approval envelope rule:
+
+- Bernard may not emit a task unless the intended reviewer could approve or reject it by inspecting:
+  - the task's writable boundary,
+  - its focused proof boundary,
+  - and any explicitly named preserve-only upstream artifact lineage
+- if review would require inspecting a second unowned production family, an implied schema source,
+  or a broader authority surface that is neither writable in the task nor explicitly supplied as
+  read-only upstream lineage, the task is under-scoped and must be split or repaired before release
+- do not leave a task in a shape where William can finish the local artifact but Bernard can only
+  decide approval by consulting missing upstream authority that the task never declared
+
+Repository-boundary downstream rule:
+
+- if a task defines or implements a repository boundary, storage boundary, writer boundary, or
+  similar downstream artifact that claims to be derived from an upstream schema, migration,
+  canonical contract, or source-of-truth record model, Bernard must choose one truthful shape:
+  1. the upstream authority is already established by a named provider task in `dependsOn`, and the
+     downstream task consumes it read-only with proof limited to the boundary artifact plus focused
+     tests, or
+  2. the downstream task itself owns the upstream authority edits in `relatedFiles`
+- do not emit a "storage-only" or "repository-only" task whose acceptance wording still depends on
+  proving a schema/model authority that is absent from both writable scope and explicit upstream
+  lineage
+- if the review hinge would ask whether the boundary mirrors a Prisma model, canonical record, or
+  other upstream authority that does not yet exist truthfully, emit the missing upstream authority
+  task first and make the downstream boundary task depend on it
+- if the downstream boundary task can be approved purely as a bounded interface/adapter artifact,
+  say that directly in `acceptanceCriteria` and `constraints`; do not let Bernard later re-expand
+  the review hinge to an undeclared upstream authority family
+
 Known failure shape to prevent:
 
 - Task A: "Establish ledger schema and migration foundation"
