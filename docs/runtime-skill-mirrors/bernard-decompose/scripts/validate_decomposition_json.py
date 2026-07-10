@@ -70,6 +70,31 @@ def classify_writable_cluster(path: str) -> str | None:
     return None
 
 
+def classify_authority_root(path: str) -> str | None:
+    cleaned = path.replace("**", "").rstrip("/")
+    if cleaned.startswith("apps/mission-control/src/app/api/tasks"):
+        return "task_api"
+    if cleaned.startswith("apps/mission-control/src/app/api/objectives"):
+        return "objective_api"
+    if cleaned == "apps/mission-control/src/lib/workers/handlers.ts":
+        return "worker_handler"
+    if cleaned == "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts":
+        return "readiness_promotion"
+    if cleaned == "apps/mission-control/prisma/schema.prisma":
+        return "prisma_schema"
+    if cleaned.startswith("apps/mission-control/prisma/migrations"):
+        return "prisma_migrations"
+    if cleaned == "apps/mission-control/src/lib/release/objective-release-service.ts":
+        return "release_runtime"
+    if cleaned == "apps/mission-control/src/lib/release/objective-deployment-service.ts":
+        return "deploy_runtime"
+    if cleaned == "apps/mission-control/src/lib/release/objective-activation-service.ts":
+        return "activation_runtime"
+    if cleaned == "apps/mission-control/src/lib/workers/escalation-events.ts":
+        return "escalation_runtime"
+    return None
+
+
 def fail(message: str) -> int:
     print(f"INVALID: {message}", file=sys.stderr)
     return 1
@@ -178,9 +203,25 @@ def main() -> int:
                         return fail(f"escaped glob found in taskContract.{field}: {item}")
             writable_files = list(task_contract.get("writableFiles", []))
             proof_files = list(task_contract.get("proofFiles", []))
+            read_only_anchors = list(task_contract.get("readOnlyAnchors", []))
+            authority_roots = sorted(
+                {
+                    root
+                    for root in (classify_authority_root(path) for path in read_only_anchors)
+                    if root
+                }
+            )
+            writable_authority_roots = sorted(
+                {
+                    root
+                    for root in (classify_authority_root(path) for path in writable_files)
+                    if root
+                }
+            )
+            effective_authority_roots = authority_roots or writable_authority_roots
             semantic_hinge = str(task_contract.get("semanticHinge", "")).lower()
             title_lower = str(task.get("title", "")).lower()
-            proof_only = "prove task/objective workflow exact parity" in semantic_hinge or "prove task/objective workflow exact parity" in title_lower
+            proof_only = "prove " in title_lower and " exact parity " in title_lower
             if proof_only:
                 if sorted(writable_files) != sorted(proof_files):
                     return fail(
@@ -203,6 +244,75 @@ def main() -> int:
                 if len(clusters) > 1:
                     return fail(
                         f"William writable scope spans multiple production clusters for {task_id}: {clusters}"
+                    )
+
+                if title_lower.startswith("author task api workflow parity") and effective_authority_roots != ["task_api"]:
+                    return fail(
+                        f"task API parity authority must stay on task_api only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower.startswith("prove task api workflow exact parity") and effective_authority_roots != ["task_api"]:
+                    return fail(
+                        f"task API proof authority must stay on task_api only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower.startswith("author objective api workflow parity") and effective_authority_roots != ["objective_api"]:
+                    return fail(
+                        f"objective API parity authority must stay on objective_api only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower.startswith("prove objective api workflow exact parity") and effective_authority_roots != ["objective_api"]:
+                    return fail(
+                        f"objective API proof authority must stay on objective_api only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower.startswith("author worker-handler workflow parity") and effective_authority_roots != ["worker_handler"]:
+                    return fail(
+                        f"worker-handler parity authority must stay on worker_handler only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower.startswith("prove worker-handler workflow exact parity") and effective_authority_roots != ["worker_handler"]:
+                    return fail(
+                        f"worker-handler proof authority must stay on worker_handler only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower.startswith("author readiness/promotion workflow parity") and effective_authority_roots != ["readiness_promotion"]:
+                    return fail(
+                        f"readiness/promotion parity authority must stay on readiness_promotion only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower.startswith("prove readiness/promotion workflow exact parity") and effective_authority_roots != ["readiness_promotion"]:
+                    return fail(
+                        f"readiness/promotion proof authority must stay on readiness_promotion only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower == "define shared task/objective workflow contract taxonomy" and authority_roots:
+                    return fail(
+                        f"shared taxonomy must consume prior proofs, not live sibling authority roots for {task_id}: {authority_roots}"
+                    )
+                if title_lower == "define ledgerevent repository boundary" and effective_authority_roots != ["prisma_schema"]:
+                    return fail(
+                        f"repository boundary authority must stay on prisma_schema only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower == "define release workflow contract taxonomy" and effective_authority_roots != ["release_runtime"]:
+                    return fail(
+                        f"release taxonomy authority must stay on release_runtime only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower == "define activation workflow contract taxonomy" and effective_authority_roots != ["activation_runtime"]:
+                    return fail(
+                        f"activation taxonomy authority must stay on activation_runtime only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower == "define escalation workflow contract taxonomy" and effective_authority_roots != ["escalation_runtime"]:
+                    return fail(
+                        f"escalation taxonomy authority must stay on escalation_runtime only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower == "wire task api entrypoint emitters to the canonical ledger path" and effective_authority_roots != ["task_api"]:
+                    return fail(
+                        f"task API emitter authority must stay on task_api only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower == "wire objective api entrypoint emitters to the canonical ledger path" and effective_authority_roots != ["objective_api"]:
+                    return fail(
+                        f"objective API emitter authority must stay on objective_api only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower == "wire worker handler transition emitters to the canonical ledger path" and effective_authority_roots != ["worker_handler"]:
+                    return fail(
+                        f"worker handler emitter authority must stay on worker_handler only for {task_id}: {effective_authority_roots}"
+                    )
+                if title_lower == "wire readiness/promotion transition emitters to the canonical ledger path" and effective_authority_roots != ["readiness_promotion"]:
+                    return fail(
+                        f"readiness/promotion emitter authority must stay on readiness_promotion only for {task_id}: {effective_authority_roots}"
                     )
 
     if len(review_tasks) != 1:

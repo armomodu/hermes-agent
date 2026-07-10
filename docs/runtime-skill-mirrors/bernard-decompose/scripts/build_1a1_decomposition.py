@@ -8,9 +8,15 @@ from pathlib import Path
 
 
 SLICE_TITLES = [
-    "Author minimal task/objective workflow parity contract slice",
-    "Prove task/objective workflow exact parity against the live route contract",
-    "Define task/objective workflow contract taxonomy",
+    "Author task API workflow parity contract slice",
+    "Prove task API workflow exact parity against the live route contract",
+    "Author objective API workflow parity contract slice",
+    "Prove objective API workflow exact parity against the live route contract",
+    "Author worker-handler workflow parity contract slice",
+    "Prove worker-handler workflow exact parity against the live route contract",
+    "Author readiness/promotion workflow parity contract slice",
+    "Prove readiness/promotion workflow exact parity against the live route contract",
+    "Define shared task/objective workflow contract taxonomy",
     "Define release workflow contract taxonomy",
     "Define activation workflow contract taxonomy",
     "Define escalation workflow contract taxonomy",
@@ -36,8 +42,8 @@ SLICE_TITLES = [
     "Document the workflow-ledger contract and operator proof path",
 ]
 
-APPROVED_EXECUTION_SLICE_COUNT = 26
-APPROVED_MAX_TASK_COUNT = 27
+APPROVED_EXECUTION_SLICE_COUNT = 32
+APPROVED_MAX_TASK_COUNT = 33
 CANARY_OBJECTIVE_ID = "4009e581-7231-4930-9a0d-b2b56b281d9e"
 
 
@@ -129,7 +135,15 @@ def validate_bounded_graph(tasks: list[dict]) -> None:
             errors.append(f"{title}: downstream task lacks a distinct substantive delta")
 
         related_files = task.get("relatedFiles", [])
+        artifact_paths = task.get("artifactPaths", [])
         title_lower = title.lower()
+        authority_roots = sorted(
+            {
+                root
+                for root in (classify_live_authority_root(path) for path in artifact_paths)
+                if root
+            }
+        )
 
         if "parity" in title_lower:
             if parity_scope_mode not in {"proof_only", "contract_output"}:
@@ -148,6 +162,16 @@ def validate_bounded_graph(tasks: list[dict]) -> None:
                     errors.append(f"{title}: contract-output parity task must not also be the proof task")
                 if "contract" not in title_lower and "contract" not in task.get("summary", "").lower():
                     errors.append(f"{title}: contract-output parity task does not name the production contract output")
+        if "task api workflow parity" in title_lower and authority_roots != ["task_api"]:
+            errors.append(f"{title}: proof/read authority must stay on task_api only, found {authority_roots}")
+        if "objective api workflow parity" in title_lower and authority_roots != ["objective_api"]:
+            errors.append(f"{title}: proof/read authority must stay on objective_api only, found {authority_roots}")
+        if "worker-handler workflow parity" in title_lower and authority_roots != ["worker_handler"]:
+            errors.append(f"{title}: proof/read authority must stay on worker_handler only, found {authority_roots}")
+        if "readiness/promotion workflow parity" in title_lower and authority_roots != ["readiness_promotion"]:
+            errors.append(f"{title}: proof/read authority must stay on readiness_promotion only, found {authority_roots}")
+        if title == "Define shared task/objective workflow contract taxonomy" and authority_roots:
+            errors.append(f"{title}: shared taxonomy must consume proven parity slices, not live sibling roots {authority_roots}")
         if "task/objective" in title_lower and "emitters" in title_lower:
             has_api_entrypoints = any("/src/app/api/tasks/" in path or "/src/app/api/objectives/" in path for path in related_files)
             has_worker_files = any("/src/lib/workers/" in path for path in related_files)
@@ -174,16 +198,22 @@ def validate_bounded_graph(tasks: list[dict]) -> None:
         if "emitters to the canonical ledger path" in title.lower():
             if any("/src/lib/knowledge-plane/contracts/" in path for path in related_files):
                 errors.append(f"{title}: emitter task must not keep contracts/** writable")
+            if authority_roots:
+                errors.append(f"{title}: emitter task must not keep sibling live mutation roots in artifact authority {authority_roots}")
         if "repository boundary" in title.lower():
             invalid = [path for path in related_files if "/prisma/" in path]
             if invalid:
                 errors.append(f"{title}: preserve-only Prisma authority must not stay writable {invalid}")
+            if authority_roots != ["prisma_schema"]:
+                errors.append(f"{title}: repository boundary must anchor only to prisma_schema, found {authority_roots}")
         if "merge/runtime transition emitters" in title.lower():
             if any("objective-deployment-service.ts" in path for path in related_files):
                 errors.append(f"{title}: merge/runtime task must not include deployment-service writable scope")
         if "deploy/verify emitters" in title.lower():
             if any("objective-release-service.ts" in path for path in related_files):
                 errors.append(f"{title}: deploy/verify task must not include release-service writable scope")
+        if title == "Define release workflow contract taxonomy" and authority_roots != ["release_runtime"]:
+            errors.append(f"{title}: release taxonomy must anchor only to release_runtime, found {authority_roots}")
 
         if "canonical ledger writer" in title.lower():
             if any("/src/lib/knowledge-plane/contracts/" in path for path in related_files):
@@ -309,6 +339,31 @@ def classify_live_writable_cluster(path: str) -> str | None:
         return "apps/mission-control/src/lib/workers/handlers.ts"
     if cleaned == "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts":
         return "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts"
+    return None
+
+
+def classify_live_authority_root(path: str) -> str | None:
+    cleaned = path.replace("**", "").rstrip("/")
+    if cleaned.startswith("apps/mission-control/src/app/api/tasks"):
+        return "task_api"
+    if cleaned.startswith("apps/mission-control/src/app/api/objectives"):
+        return "objective_api"
+    if cleaned == "apps/mission-control/src/lib/workers/handlers.ts":
+        return "worker_handler"
+    if cleaned == "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts":
+        return "readiness_promotion"
+    if cleaned == "apps/mission-control/prisma/schema.prisma":
+        return "prisma_schema"
+    if cleaned.startswith("apps/mission-control/prisma/migrations"):
+        return "prisma_migrations"
+    if cleaned == "apps/mission-control/src/lib/release/objective-release-service.ts":
+        return "release_runtime"
+    if cleaned == "apps/mission-control/src/lib/release/objective-deployment-service.ts":
+        return "deploy_runtime"
+    if cleaned == "apps/mission-control/src/lib/release/objective-activation-service.ts":
+        return "activation_runtime"
+    if cleaned == "apps/mission-control/src/lib/workers/escalation-events.ts":
+        return "escalation_runtime"
     return None
 
 
@@ -470,11 +525,17 @@ def main() -> int:
     parity_writable_paths = [
         "apps/mission-control/src/lib/knowledge-plane/contracts/**",
     ]
-    parity_authority_paths = [
+    task_api_authority_paths = [
         "apps/mission-control/src/app/api/tasks/route.ts",
         "apps/mission-control/src/app/api/tasks/[id]/route.ts",
+    ]
+    objective_api_authority_paths = [
         "apps/mission-control/src/app/api/objectives/[id]/route.ts",
+    ]
+    worker_handler_authority_paths = [
         "apps/mission-control/src/lib/workers/handlers.ts",
+    ]
+    readiness_authority_paths = [
         "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts",
     ]
     contract_scope_paths = [
@@ -521,20 +582,20 @@ def main() -> int:
 
     t1 = make_task(
         title=SLICE_TITLES[0],
-        summary="Author only the minimal task/objective production contract parity slice needed for the named live route branch without widening into broader taxonomy.",
+        summary="Author only the minimal task API production contract parity slice needed for the live task-route branch without widening into broader taxonomy.",
         acceptance=text(
-            "A minimal task/objective production contract parity slice exists for the named live route/transition branch.",
-            "The authored slice stays narrower than the downstream task/objective taxonomy task and does not broaden into adjacent workflow families.",
+            "A minimal task API production contract parity slice exists for the live task-route branch.",
+            "The authored slice stays narrower than the downstream shared task/objective taxonomy task and does not broaden into adjacent workflow families.",
             "The contract slice loads cleanly without requiring broader taxonomy, validator invention, or runtime emitter wiring.",
         ),
         constraints=text(
-            "Exact-parity contract-output task only.",
-            "Author only the minimal task/objective contract parity slice; do not build the route-anchored parity proof here.",
+            "Task API exact-parity contract-output task only.",
+            "Author only the minimal task API contract parity slice; do not build the parity proof here.",
             "Do not widen into validators, broader taxonomy, or adjacent workflow families.",
         ),
         related_files=parity_writable_paths,
-        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/__tests__/**", *parity_authority_paths],
-        next_action="Read the live task/objective transition authority surfaces as read-only input, then author only the minimal contract slice for that exact branch.",
+        artifact_paths=task_api_authority_paths,
+        next_action="Read only the live task API authority surfaces, then author the minimal task API parity contract slice for that exact branch.",
         workflow_families=["task/objective"],
         abstraction_classes=["contract parity slice"],
         primary_artifact_class="contract parity slice",
@@ -544,20 +605,20 @@ def main() -> int:
 
     t1b = make_task(
         title=SLICE_TITLES[1],
-        summary="Prove the authored minimal task/objective parity contract slice matches the live route surfaces exactly with proof-only writable scope.",
+        summary="Prove the authored minimal task API parity contract slice matches the live task-route surfaces exactly with proof-only writable scope.",
         acceptance=text(
-            "A focused source-derived proof demonstrates the task/objective parity slice matches the live Mission Control route/transition behavior exactly.",
+            "A focused source-derived proof demonstrates the task API parity slice matches the live Mission Control task-route behavior exactly.",
             "The proof task stays proof-only and does not edit the production contract slice, validators, or broader taxonomy.",
             "Mission Control typecheck and the focused parity proof pass.",
         ),
         constraints=text(
-            "Exact-parity proof-only task.",
-            "Consume the authored minimal parity contract slice from the prior task without editing it.",
+            "Task API exact-parity proof-only task.",
+            "Consume the authored minimal task API parity contract slice from the prior task without editing it.",
             "Do not widen into broader taxonomy, validators, or adjacent workflow families.",
         ),
         related_files=[],
-        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/contracts/**", *parity_authority_paths],
-        next_action="Write the route-anchored proof against the authored parity slice using only proof-file writable scope.",
+        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/contracts/**", *task_api_authority_paths],
+        next_action="Write the task-route-anchored proof against the authored task API parity slice using only proof-file writable scope.",
         depends_on=[t1["id"]],
         workflow_families=["task/objective"],
         abstraction_classes=["focused proof slice"],
@@ -566,22 +627,164 @@ def main() -> int:
     )
     tasks.append(t1b)
 
-    t2 = make_task(
+    t1c = make_task(
         title=SLICE_TITLES[2],
-        summary="Define the remaining task/objective workflow event names and payload shapes outside the already-authored and already-proven parity slice.",
+        summary="Author only the minimal objective API production contract parity slice needed for the live objective-route branch without widening into broader taxonomy.",
         acceptance=text(
-            "Task/objective workflow contract definitions exist under the knowledge-plane contracts layer.",
-            "The taxonomy excludes release, activation, and escalation families.",
-            "Focused tests or deterministic validation prove the task/objective family definitions load cleanly.",
+            "A minimal objective API production contract parity slice exists for the live objective-route branch.",
+            "The authored slice stays narrower than the downstream shared task/objective taxonomy task and does not broaden into adjacent workflow families.",
+            "The contract slice loads cleanly without requiring broader taxonomy, validator invention, or runtime emitter wiring.",
         ),
         constraints=text(
-            "Consume the parity slice from the prior tasks instead of redefining it.",
+            "Objective API exact-parity contract-output task only.",
+            "Author only the minimal objective API contract parity slice; do not build the parity proof here.",
+            "Do not widen into validators, broader taxonomy, or adjacent workflow families.",
+        ),
+        related_files=parity_writable_paths,
+        artifact_paths=objective_api_authority_paths,
+        next_action="Read only the live objective API authority surface, then author the minimal objective API parity contract slice for that exact branch.",
+        workflow_families=["task/objective"],
+        abstraction_classes=["contract parity slice"],
+        primary_artifact_class="contract parity slice",
+        parity_scope_mode="contract_output",
+    )
+    tasks.append(t1c)
+
+    t1d = make_task(
+        title=SLICE_TITLES[3],
+        summary="Prove the authored minimal objective API parity contract slice matches the live objective-route surface exactly with proof-only writable scope.",
+        acceptance=text(
+            "A focused source-derived proof demonstrates the objective API parity slice matches the live Mission Control objective-route behavior exactly.",
+            "The proof task stays proof-only and does not edit the production contract slice, validators, or broader taxonomy.",
+            "Mission Control typecheck and the focused parity proof pass.",
+        ),
+        constraints=text(
+            "Objective API exact-parity proof-only task.",
+            "Consume the authored minimal objective API parity contract slice from the prior task without editing it.",
+            "Do not widen into broader taxonomy, validators, or adjacent workflow families.",
+        ),
+        related_files=[],
+        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/contracts/**", *objective_api_authority_paths],
+        next_action="Write the objective-route-anchored proof against the authored objective API parity slice using only proof-file writable scope.",
+        depends_on=[t1c["id"]],
+        workflow_families=["task/objective"],
+        abstraction_classes=["focused proof slice"],
+        primary_artifact_class="focused proof slice",
+        parity_scope_mode="proof_only",
+    )
+    tasks.append(t1d)
+
+    t1e = make_task(
+        title=SLICE_TITLES[4],
+        summary="Author only the minimal worker-handler production contract parity slice needed for the live worker-handler branch without widening into broader taxonomy.",
+        acceptance=text(
+            "A minimal worker-handler production contract parity slice exists for the live worker-handler branch.",
+            "The authored slice stays narrower than the downstream shared task/objective taxonomy task and does not broaden into adjacent workflow families.",
+            "The contract slice loads cleanly without requiring broader taxonomy, validator invention, or runtime emitter wiring.",
+        ),
+        constraints=text(
+            "Worker-handler exact-parity contract-output task only.",
+            "Author only the minimal worker-handler contract parity slice; do not build the parity proof here.",
+            "Do not widen into validators, broader taxonomy, or adjacent workflow families.",
+        ),
+        related_files=parity_writable_paths,
+        artifact_paths=worker_handler_authority_paths,
+        next_action="Read only the live worker-handler authority surface, then author the minimal worker-handler parity contract slice for that exact branch.",
+        workflow_families=["task/objective"],
+        abstraction_classes=["contract parity slice"],
+        primary_artifact_class="contract parity slice",
+        parity_scope_mode="contract_output",
+    )
+    tasks.append(t1e)
+
+    t1f = make_task(
+        title=SLICE_TITLES[5],
+        summary="Prove the authored minimal worker-handler parity contract slice matches the live worker-handler surface exactly with proof-only writable scope.",
+        acceptance=text(
+            "A focused source-derived proof demonstrates the worker-handler parity slice matches the live Mission Control worker-handler behavior exactly.",
+            "The proof task stays proof-only and does not edit the production contract slice, validators, or broader taxonomy.",
+            "Mission Control typecheck and the focused parity proof pass.",
+        ),
+        constraints=text(
+            "Worker-handler exact-parity proof-only task.",
+            "Consume the authored minimal worker-handler parity contract slice from the prior task without editing it.",
+            "Do not widen into broader taxonomy, validators, or adjacent workflow families.",
+        ),
+        related_files=[],
+        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/contracts/**", *worker_handler_authority_paths],
+        next_action="Write the worker-handler-anchored proof against the authored parity slice using only proof-file writable scope.",
+        depends_on=[t1e["id"]],
+        workflow_families=["task/objective"],
+        abstraction_classes=["focused proof slice"],
+        primary_artifact_class="focused proof slice",
+        parity_scope_mode="proof_only",
+    )
+    tasks.append(t1f)
+
+    t1g = make_task(
+        title=SLICE_TITLES[6],
+        summary="Author only the minimal readiness/promotion production contract parity slice needed for the live readiness/promotion branch without widening into broader taxonomy.",
+        acceptance=text(
+            "A minimal readiness/promotion production contract parity slice exists for the live readiness/promotion branch.",
+            "The authored slice stays narrower than the downstream shared task/objective taxonomy task and does not broaden into adjacent workflow families.",
+            "The contract slice loads cleanly without requiring broader taxonomy, validator invention, or runtime emitter wiring.",
+        ),
+        constraints=text(
+            "Readiness/promotion exact-parity contract-output task only.",
+            "Author only the minimal readiness/promotion contract parity slice; do not build the parity proof here.",
+            "Do not widen into validators, broader taxonomy, or adjacent workflow families.",
+        ),
+        related_files=parity_writable_paths,
+        artifact_paths=readiness_authority_paths,
+        next_action="Read only the live readiness/promotion authority surface, then author the minimal readiness/promotion parity contract slice for that exact branch.",
+        workflow_families=["task/objective"],
+        abstraction_classes=["contract parity slice"],
+        primary_artifact_class="contract parity slice",
+        parity_scope_mode="contract_output",
+    )
+    tasks.append(t1g)
+
+    t1h = make_task(
+        title=SLICE_TITLES[7],
+        summary="Prove the authored minimal readiness/promotion parity contract slice matches the live readiness/promotion surface exactly with proof-only writable scope.",
+        acceptance=text(
+            "A focused source-derived proof demonstrates the readiness/promotion parity slice matches the live Mission Control readiness/promotion behavior exactly.",
+            "The proof task stays proof-only and does not edit the production contract slice, validators, or broader taxonomy.",
+            "Mission Control typecheck and the focused parity proof pass.",
+        ),
+        constraints=text(
+            "Readiness/promotion exact-parity proof-only task.",
+            "Consume the authored minimal readiness/promotion parity contract slice from the prior task without editing it.",
+            "Do not widen into broader taxonomy, validators, or adjacent workflow families.",
+        ),
+        related_files=[],
+        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/contracts/**", *readiness_authority_paths],
+        next_action="Write the readiness/promotion-anchored proof against the authored parity slice using only proof-file writable scope.",
+        depends_on=[t1g["id"]],
+        workflow_families=["task/objective"],
+        abstraction_classes=["focused proof slice"],
+        primary_artifact_class="focused proof slice",
+        parity_scope_mode="proof_only",
+    )
+    tasks.append(t1h)
+
+    t2 = make_task(
+        title=SLICE_TITLES[8],
+        summary="Define the shared task/objective workflow event names and payload shapes outside the already-authored and already-proven root-bounded parity slices.",
+        acceptance=text(
+            "Shared task/objective workflow contract definitions exist under the knowledge-plane contracts layer.",
+            "The shared taxonomy consumes the proven root-bounded parity slices instead of rereading sibling runtime roots directly.",
+            "The taxonomy excludes release, activation, and escalation families.",
+        ),
+        constraints=text(
+            "Shared task/objective taxonomy only.",
+            "Consume the four proven parity slices instead of rereading live route or worker roots directly.",
             "Do not wire runtime emitters in this task.",
         ),
         related_files=parity_writable_paths,
-        artifact_paths=["apps/mission-control/src/lib/knowledge-plane/contracts/**", *parity_authority_paths],
-        next_action="Extend the task/objective contract family around the already-authored and already-proven parity slice without wiring emitters yet, using the live runtime files as read-only authority only.",
-        depends_on=[t1b["id"]],
+        artifact_paths=[],
+        next_action="Extend the shared task/objective contract family around the four proven root-bounded parity slices without wiring emitters yet.",
+        depends_on=[t1b["id"], t1d["id"], t1f["id"], t1h["id"]],
         workflow_families=["task/objective"],
         abstraction_classes=["contract family"],
         primary_artifact_class="contract family",
@@ -589,7 +792,7 @@ def main() -> int:
     tasks.append(t2)
 
     t3 = make_task(
-        title=SLICE_TITLES[3],
+        title=SLICE_TITLES[9],
         summary="Author the release workflow contract family as an explicit contract input for later release emitter tasks.",
         acceptance=text(
             "Release event names and payload shapes are defined in the contracts layer.",
@@ -602,9 +805,7 @@ def main() -> int:
         ),
         related_files=release_contract_paths,
         artifact_paths=[
-            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/release/objective-release-service.ts",
-            "apps/mission-control/src/lib/release/objective-deployment-service.ts",
         ],
         next_action="Define the release workflow contract family as explicit upstream input for later release emitter tasks, using the live release runtime files as read-only authority only.",
         workflow_families=["release"],
@@ -614,7 +815,7 @@ def main() -> int:
     tasks.append(t3)
 
     t3b = make_task(
-        title=SLICE_TITLES[4],
+        title=SLICE_TITLES[10],
         summary="Author the activation workflow contract family as an explicit contract input for later activation emitter tasks.",
         acceptance=text(
             "Activation event names and payload shapes are defined in the contracts layer.",
@@ -627,7 +828,6 @@ def main() -> int:
         ),
         related_files=activation_contract_paths,
         artifact_paths=[
-            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/release/objective-activation-service.ts",
         ],
         next_action="Define the activation workflow contract family as explicit upstream input for later activation emitter tasks, using the live activation runtime file as read-only authority only.",
@@ -638,7 +838,7 @@ def main() -> int:
     tasks.append(t3b)
 
     t3c = make_task(
-        title=SLICE_TITLES[5],
+        title=SLICE_TITLES[11],
         summary="Author the escalation workflow contract family as an explicit contract input for later escalation emitter tasks.",
         acceptance=text(
             "Escalation event names and payload shapes are defined in the contracts layer.",
@@ -651,7 +851,6 @@ def main() -> int:
         ),
         related_files=escalation_contract_paths,
         artifact_paths=[
-            "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/workers/escalation-events.ts",
         ],
         next_action="Define the escalation workflow contract family as explicit upstream input for later escalation emitter tasks, using the live escalation runtime file as read-only authority only.",
@@ -662,7 +861,7 @@ def main() -> int:
     tasks.append(t3c)
 
     t4 = make_task(
-        title=SLICE_TITLES[6],
+        title=SLICE_TITLES[12],
         summary="Lay down the LedgerEvent Prisma schema model foundation for durable workflow event storage before any storage or ledger implementation begins.",
         acceptance=text(
             "The LedgerEvent schema model is defined in Prisma with migration-safe IDs and correlation fields.",
@@ -683,7 +882,7 @@ def main() -> int:
     tasks.append(t4)
 
     t4b = make_task(
-        title=SLICE_TITLES[7],
+        title=SLICE_TITLES[13],
         summary="Create the LedgerEvent Prisma migration scaffold over the established schema model without expanding into repository or runtime behavior.",
         acceptance=text(
             "A bounded LedgerEvent migration scaffold exists for the approved schema model.",
@@ -705,7 +904,7 @@ def main() -> int:
     tasks.append(t4b)
 
     t5 = make_task(
-        title=SLICE_TITLES[8],
+        title=SLICE_TITLES[14],
         summary="Define the concrete LedgerEvent repository boundary over the established schema without taking on exports, writer logic, or duplicate handling yet.",
         acceptance=text(
             "A concrete LedgerEvent repository boundary exists for ledger events and consumes the established Prisma LedgerEvent schema as read-only input.",
@@ -719,7 +918,7 @@ def main() -> int:
             "Do not wire storage exports, implement the canonical writer, emitter wiring, or duplicate prevention here.",
         ),
         related_files=storage_foundation_paths,
-        artifact_paths=["apps/mission-control/src/lib/storage/**", *schema_model_paths, *schema_migration_paths],
+        artifact_paths=[*schema_model_paths],
         next_action="Define the concrete repository boundary that later storage-export and writer tasks will call.",
         depends_on=[t4["id"], t4b["id"]],
         workflow_families=["ledger-storage"],
@@ -729,7 +928,7 @@ def main() -> int:
     tasks.append(t5)
 
     t5b = make_task(
-        title=SLICE_TITLES[9],
+        title=SLICE_TITLES[15],
         summary="Wire the LedgerEvent storage export surface over the established repository boundary without taking on writer logic or duplicate handling.",
         acceptance=text(
             "The LedgerEvent storage export surface is explicit and stable for downstream ledger tasks.",
@@ -754,7 +953,7 @@ def main() -> int:
     tasks.append(t5b)
 
     t6 = make_task(
-        title=SLICE_TITLES[10],
+        title=SLICE_TITLES[16],
         summary="Implement the canonical ledger writer over the existing storage export surface without taking on identity/correlation hardening or duplicate handling yet.",
         acceptance=text(
             "A single canonical ledger writer exists over the established storage export surface.",
@@ -779,7 +978,7 @@ def main() -> int:
     tasks.append(t6)
 
     t6b = make_task(
-        title=SLICE_TITLES[11],
+        title=SLICE_TITLES[17],
         summary="Harden stable event identity and correlation mapping for ledger writes over the existing canonical writer.",
         acceptance=text(
             "Stable event identity and correlation mapping is enforced on the ledger write path.",
@@ -804,7 +1003,7 @@ def main() -> int:
     tasks.append(t6b)
 
     t7 = make_task(
-        title=SLICE_TITLES[12],
+        title=SLICE_TITLES[18],
         summary="Wire direct task API mutation entrypoints to the canonical ledger path using the already-authored task/objective contract family.",
         acceptance=text(
             "Direct task API mutation entrypoints emit through the canonical ledger path.",
@@ -823,7 +1022,6 @@ def main() -> int:
             "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
             "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
-            "apps/mission-control/src/app/api/objectives/[id]/route.ts",
         ],
         next_action="Wire only the direct task API mutation entrypoints to the canonical writer and prove them with focused tests.",
         depends_on=[t2["id"], t6["id"], t6b["id"]],
@@ -834,7 +1032,7 @@ def main() -> int:
     tasks.append(t7)
 
     t7b = make_task(
-        title=SLICE_TITLES[13],
+        title=SLICE_TITLES[19],
         summary="Wire direct objective API mutation entrypoints to the canonical ledger path using the already-authored task/objective contract family.",
         acceptance=text(
             "Direct objective API mutation entrypoints emit through the canonical ledger path.",
@@ -852,8 +1050,6 @@ def main() -> int:
             "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
             "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
-            "apps/mission-control/src/app/api/tasks/route.ts",
-            "apps/mission-control/src/app/api/tasks/[id]/route.ts",
         ],
         next_action="Wire only the direct objective API mutation entrypoints to the canonical writer and prove them with focused tests.",
         depends_on=[t2["id"], t6["id"], t6b["id"]],
@@ -864,7 +1060,7 @@ def main() -> int:
     tasks.append(t7b)
 
     t7c = make_task(
-        title=SLICE_TITLES[14],
+        title=SLICE_TITLES[20],
         summary="Wire worker handler task/objective transition paths to the canonical ledger path using the already-authored task/objective contract family.",
         acceptance=text(
             "Worker handler task/objective transition behavior emits through the canonical ledger path.",
@@ -882,7 +1078,6 @@ def main() -> int:
             "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
             "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
-            "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts",
         ],
         next_action="Wire only the worker handler transition paths to the canonical writer and prove them with focused tests.",
         depends_on=[t2["id"], t6["id"], t6b["id"]],
@@ -893,7 +1088,7 @@ def main() -> int:
     tasks.append(t7c)
 
     t7d = make_task(
-        title=SLICE_TITLES[15],
+        title=SLICE_TITLES[21],
         summary="Wire readiness/promotion task progression paths to the canonical ledger path using the already-authored task/objective contract family.",
         acceptance=text(
             "Readiness and promotion task/objective transition behavior emits through the canonical ledger path.",
@@ -911,7 +1106,6 @@ def main() -> int:
             "apps/mission-control/src/lib/knowledge-plane/contracts/**",
             "apps/mission-control/src/lib/knowledge-plane/ledger/**",
             "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
-            "apps/mission-control/src/lib/workers/handlers.ts",
         ],
         next_action="Wire only the readiness/promotion transition paths to the canonical writer and prove them with focused tests.",
         depends_on=[t2["id"], t6["id"], t6b["id"]],
@@ -922,7 +1116,7 @@ def main() -> int:
     tasks.append(t7d)
 
     t8 = make_task(
-        title=SLICE_TITLES[16],
+        title=SLICE_TITLES[22],
         summary="Wire release-start events to the canonical ledger path using the already-authored release contract family.",
         acceptance=text(
             "Release-start runtime behavior emits the expected ledger events through the canonical writer.",
@@ -945,7 +1139,7 @@ def main() -> int:
     tasks.append(t8)
 
     t9 = make_task(
-        title=SLICE_TITLES[17],
+        title=SLICE_TITLES[23],
         summary="Wire merge/runtime transition events to the canonical ledger path using the already-authored release contract family.",
         acceptance=text(
             "Merge/runtime transition behavior emits through the canonical writer.",
@@ -968,7 +1162,7 @@ def main() -> int:
     tasks.append(t9)
 
     t10 = make_task(
-        title=SLICE_TITLES[18],
+        title=SLICE_TITLES[24],
         summary="Wire deploy/verify runtime events to the canonical ledger path using the already-authored release contract family.",
         acceptance=text(
             "Deploy/verify runtime behavior emits through the canonical writer.",
@@ -991,7 +1185,7 @@ def main() -> int:
     tasks.append(t10)
 
     t11 = make_task(
-        title=SLICE_TITLES[19],
+        title=SLICE_TITLES[25],
         summary="Wire activation runtime events to the canonical ledger path using the already-authored activation contract family.",
         acceptance=text(
             "Activation runtime behavior emits through the canonical writer.",
@@ -1014,7 +1208,7 @@ def main() -> int:
     tasks.append(t11)
 
     t12 = make_task(
-        title=SLICE_TITLES[20],
+        title=SLICE_TITLES[26],
         summary="Wire escalation runtime events to the canonical ledger path using the already-authored escalation contract family.",
         acceptance=text(
             "Escalation runtime behavior emits through the canonical writer.",
@@ -1039,7 +1233,7 @@ def main() -> int:
     tasks.append(t12)
 
     t13 = make_task(
-        title=SLICE_TITLES[21],
+        title=SLICE_TITLES[27],
         summary="Implement the deterministic ledger readback query surface over the persisted ledger events.",
         acceptance=text(
             "Deterministic readback queries exist for objective, task, agent, and event-type access patterns.",
@@ -1058,7 +1252,7 @@ def main() -> int:
     tasks.append(t13)
 
     t14 = make_task(
-        title=SLICE_TITLES[22],
+        title=SLICE_TITLES[28],
         summary="Expose ledger readback through the API surface and prove the readback contract end to end.",
         acceptance=text(
             "Ledger readback API routes exist and consume the deterministic query layer.",
@@ -1077,7 +1271,7 @@ def main() -> int:
     tasks.append(t14)
 
     t15 = make_task(
-        title=SLICE_TITLES[23],
+        title=SLICE_TITLES[29],
         summary="Harden replay/remediation duplicate prevention so retries, replay, remediation loops, and repeated writes do not create incorrect duplicate ledger writes.",
         acceptance=text(
             "Duplicate prevention is enforced on the ledger write path for the relevant retry/replay surfaces.",
@@ -1101,7 +1295,7 @@ def main() -> int:
     tasks.append(t15)
 
     t16 = make_task(
-        title=SLICE_TITLES[24],
+        title=SLICE_TITLES[30],
         summary="Backfill a bounded recent slice of factory workflow history into the ledger without expanding into full retrieval or synthesis work.",
         acceptance=text(
             "A bounded recent backfill path exists for the intended workflow slice.",
@@ -1122,7 +1316,7 @@ def main() -> int:
     tasks.append(t16)
 
     t17 = make_task(
-        title=SLICE_TITLES[25],
+        title=SLICE_TITLES[31],
         summary="Document the workflow-ledger contract, operator proof path, and objective-local scope boundaries for this phase.",
         acceptance=text(
             "Repo-local knowledge-plane documentation captures the workflow-ledger contract and proof surfaces introduced by this objective.",
@@ -1135,7 +1329,7 @@ def main() -> int:
         next_action="Write the scoped workflow-ledger docs after the runtime surfaces are in place.",
         assignee="Librarian",
         depends_on=[
-            t1["id"], t1b["id"], t2["id"], t3["id"], t3b["id"], t3c["id"], t4["id"], t4b["id"], t5["id"],
+            t1["id"], t1b["id"], t1c["id"], t1d["id"], t1e["id"], t1f["id"], t1g["id"], t1h["id"], t2["id"], t3["id"], t3b["id"], t3c["id"], t4["id"], t4b["id"], t5["id"],
             t5b["id"], t6["id"], t6b["id"], t7["id"], t7b["id"], t7c["id"], t7d["id"], t8["id"], t9["id"], t10["id"],
             t11["id"], t12["id"], t13["id"], t14["id"], t15["id"], t16["id"],
         ],
@@ -1181,7 +1375,7 @@ def main() -> int:
 
     if len(tasks) != APPROVED_MAX_TASK_COUNT:
         raise SystemExit(
-            f"expected {APPROVED_MAX_TASK_COUNT} total tasks (26 execution slices + 1 gate review), found {len(tasks)}"
+            f"expected {APPROVED_MAX_TASK_COUNT} total tasks (32 execution slices + 1 gate review), found {len(tasks)}"
         )
 
     validate_bounded_graph(tasks)
@@ -1190,7 +1384,7 @@ def main() -> int:
         "objectiveId": objective["id"],
         "actor": "Bernard",
         "requestReview": True,
-        "statusNote": "Decomposed 1A.1 into 27 bounded single-root slices with dedicated gate review.",
+        "statusNote": "Decomposed 1A.1 into 33 root-bounded contract-mode slices with dedicated gate review.",
         "tasks": sanitize_tasks(tasks),
     }
 
