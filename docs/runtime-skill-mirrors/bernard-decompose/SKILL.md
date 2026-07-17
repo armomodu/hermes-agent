@@ -116,7 +116,7 @@ Before returning the result:
 1. write the exact candidate JSON to a temporary file;
 2. run `python3 scripts/validate_decomposition_json.py --repair <task-repair-result.json>`;
 3. fix the candidate locally until validation passes;
-4. emit only the validated JSON.
+4. return the exact validated file contents byte-for-byte; do not reconstruct, wrap, or append to the JSON.
 
 Never return an unvalidated repair. Mission Control remains the final authority and will compile and
 lint the repaired task against the complete objective graph before applying it.
