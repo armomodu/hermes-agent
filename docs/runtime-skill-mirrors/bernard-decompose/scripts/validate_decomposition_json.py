@@ -163,13 +163,18 @@ def validate_task_contract_local(
                 return f"escaped glob found in taskContract.{field}: {item}"
     for field, root_field in (
         ("writableFiles", "mutationRoot"),
-        ("createdFileGlobs", "mutationRoot"),
         ("proofFiles", "proofRoot"),
         ("readOnlyAnchors", "authorityRoot"),
     ):
         for item in normalized_string_list(task_contract.get(field)):
             if not _path_within_root(item, roots[root_field]):
                 return f"taskContract.{field} escapes {root_field} for {task_id}: {item} not under {roots[root_field]}"
+    for item in normalized_string_list(task_contract.get("createdFileGlobs")):
+        if not (
+            _path_within_root(item, roots["mutationRoot"])
+            or _path_within_root(item, roots["proofRoot"])
+        ):
+            return f"taskContract.createdFileGlobs escapes mutationRoot and proofRoot for {task_id}: {item}"
     execution_plan = task_contract.get("executionPlan")
     if not isinstance(execution_plan, dict):
         return f"taskContract.executionPlan is required for {task_id}"

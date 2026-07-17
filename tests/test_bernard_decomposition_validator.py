@@ -24,7 +24,9 @@ def task_contract(root: str) -> dict:
         "proofRoot": "apps/mission-control/src/lib/knowledge-plane/__tests__",
         "acceptanceHinge": "The bounded contract matches release authority",
         "writableFiles": [f"{root}/release.ts"],
-        "createdFileGlobs": [],
+        "createdFileGlobs": [
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/release.test.ts"
+        ],
         "proofFiles": ["apps/mission-control/src/lib/knowledge-plane/__tests__/release.test.ts"],
         "readOnlyAnchors": ["apps/mission-control/src/lib/release/objective-release-service.ts"],
         "outputArtifacts": [],
@@ -121,6 +123,13 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(payload, "--repair")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unresolved reference", result.stderr)
+
+    def test_repair_with_created_path_outside_contract_roots_fails(self) -> None:
+        payload = repair_payload()
+        payload["taskContract"]["createdFileGlobs"] = ["apps/mission-control/src/app/api/unrelated.ts"]
+        result = self.run_validator(payload, "--repair")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("escapes mutationRoot and proofRoot", result.stderr)
 
     def test_full_decomposition_still_passes(self) -> None:
         execution_id = str(uuid.uuid4())
