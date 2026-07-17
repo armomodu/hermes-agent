@@ -95,24 +95,177 @@ def classify_authority_root(path: str) -> str | None:
     return None
 
 
+def normalized_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
 def fail(message: str) -> int:
     print(f"INVALID: {message}", file=sys.stderr)
     return 1
 
 
+def _path_within_root(path: str, root: str) -> bool:
+    clean_path = path.replace("/**", "").rstrip("/")
+    clean_root = root.replace("/**", "").rstrip("/")
+    return bool(clean_path and clean_root) and (
+        clean_path == clean_root or clean_path.startswith(clean_root + "/")
+    )
+
+
+def _execution_plan_reference_valid(reference: str, task_contract: dict) -> bool:
+    if reference in ("authorityRoot", "mutationRoot", "proofRoot"):
+        return bool(str(task_contract.get(reference) or "").strip())
+    if reference.startswith("consumedToken:"):
+        return reference.removeprefix("consumedToken:") in normalized_string_list(task_contract.get("consumes"))
+    if reference.startswith("outputArtifact:"):
+        try:
+            index = int(reference.removeprefix("outputArtifact:"))
+        except ValueError:
+            return False
+        return 0 <= index < len(normalized_string_list(task_contract.get("outputArtifacts")))
+    return False
+
+
+def validate_task_contract_local(
+    task_contract: object,
+    task_id: str,
+    *,
+    strict_plan: bool = False,
+) -> str | None:
+    if not isinstance(task_contract, dict):
+        return f"taskContract must be an object for {task_id}"
+    if task_contract.get("version") != "task-contract.v1":
+        return f"taskContract.version must be task-contract.v1 for {task_id}"
+    roots = {
+        field: str(task_contract.get(field) or "").strip()
+        for field in ("mutationRoot", "authorityRoot", "proofRoot")
+    }
+    for field, value in roots.items():
+        if not value:
+            return f"taskContract.{field} is required for {task_id}"
+    for field in ("semanticHinge", "acceptanceHinge"):
+        if not str(task_contract.get(field) or "").strip():
+            return f"taskContract.{field} is required for {task_id}"
+    list_fields = (
+        "writableFiles", "proofFiles", "createdFileGlobs", "readOnlyAnchors",
+        "outputArtifacts", "provides", "consumes",
+    )
+    for field in list_fields:
+        values = task_contract.get(field, [])
+        if not isinstance(values, list):
+            return f"taskContract.{field} must be a list for {task_id}"
+        for item in values:
+            if not isinstance(item, str):
+                return f"taskContract.{field} must contain only strings for {task_id}"
+            if "\\*\\*" in item:
+                return f"escaped glob found in taskContract.{field}: {item}"
+    for field, root_field in (
+        ("writableFiles", "mutationRoot"),
+        ("createdFileGlobs", "mutationRoot"),
+        ("proofFiles", "proofRoot"),
+        ("readOnlyAnchors", "authorityRoot"),
+    ):
+        for item in normalized_string_list(task_contract.get(field)):
+            if not _path_within_root(item, roots[root_field]):
+                return f"taskContract.{field} escapes {root_field} for {task_id}: {item} not under {roots[root_field]}"
+    execution_plan = task_contract.get("executionPlan")
+    if not isinstance(execution_plan, dict):
+        return f"taskContract.executionPlan is required for {task_id}"
+    if execution_plan.get("version") != "task-execution-plan.v1":
+        return f"taskContract.executionPlan.version must be task-execution-plan.v1 for {task_id}"
+    outcome = str(execution_plan.get("outcome") or "").strip()
+    if not outcome:
+        return f"taskContract.executionPlan.outcome is required for {task_id}"
+    if strict_plan and outcome.lower() == str(task_contract.get("semanticHinge") or "").strip().lower():
+        return f"taskContract.executionPlan.outcome must add detail beyond semanticHinge for {task_id}"
+    steps = execution_plan.get("steps")
+    if not isinstance(steps, list):
+        return f"taskContract.executionPlan.steps must be a list for {task_id}"
+    step_kinds = [step.get("kind") for step in steps if isinstance(step, dict)]
+    required = ["inspect_authority", "derive_delta", "apply_change", "verify"]
+    if any(kind not in step_kinds for kind in required):
+        return f"taskContract.executionPlan must include inspect, derive, apply, and verify steps for {task_id}"
+    positions = [step_kinds.index(kind) for kind in required]
+    if positions != sorted(positions):
+        return f"taskContract.executionPlan steps are out of order for {task_id}"
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict) or not str(step.get("instruction") or "").strip():
+            return f"taskContract.executionPlan step instruction is required for {task_id}"
+        references = step.get("references")
+        if not isinstance(references, list) or not references:
+            return f"taskContract.executionPlan step references are required for {task_id}"
+        if strict_plan:
+            for reference in references:
+                if not isinstance(reference, str) or not _execution_plan_reference_valid(reference.strip(), task_contract):
+                    return f"taskContract.executionPlan.steps[{index}] has unresolved reference {reference!r} for {task_id}"
+            if step.get("kind") == "apply_change" and "mutationRoot" not in references:
+                return f"taskContract.executionPlan apply_change must reference mutationRoot for {task_id}"
+            if step.get("kind") == "verify" and "proofRoot" not in references:
+                return f"taskContract.executionPlan verify must reference proofRoot for {task_id}"
+    expected_changes = execution_plan.get("expectedChanges")
+    if not isinstance(expected_changes, list) or not expected_changes:
+        return f"taskContract.executionPlan.expectedChanges is required for {task_id}"
+    if strict_plan:
+        for index, change in enumerate(expected_changes):
+            if not isinstance(change, dict) or change.get("target") != "mutationRoot":
+                return f"taskContract.executionPlan.expectedChanges[{index}].target must be mutationRoot for {task_id}"
+            if change.get("operation") not in ("add", "modify", "remove"):
+                return f"taskContract.executionPlan.expectedChanges[{index}].operation is invalid for {task_id}"
+            if not normalized_string_list(change.get("symbols")):
+                return f"taskContract.executionPlan.expectedChanges[{index}].symbols is required for {task_id}"
+            if not str(change.get("invariant") or "").strip():
+                return f"taskContract.executionPlan.expectedChanges[{index}].invariant is required for {task_id}"
+    if not normalized_string_list(execution_plan.get("completionChecks")):
+        return f"taskContract.executionPlan.completionChecks is required for {task_id}"
+    return None
+
+
+def validate_repair_payload(payload: object) -> int:
+    if not isinstance(payload, dict) or payload.get("kind") != "task_repair_result":
+        return fail("kind must be task_repair_result")
+    source_task_id = str(payload.get("sourceTaskId") or "").strip()
+    try:
+        uuid.UUID(source_task_id)
+    except Exception as exc:
+        return fail(f"invalid sourceTaskId {source_task_id}: {exc}")
+    source_attempt = payload.get("sourceAttemptNumber")
+    if not isinstance(source_attempt, int) or isinstance(source_attempt, bool) or source_attempt < 1:
+        return fail("sourceAttemptNumber must be a positive integer")
+    for field in ("title", "nextAction"):
+        if field in payload and not isinstance(payload[field], str):
+            return fail(f"{field} must be a string when provided")
+    issue = validate_task_contract_local(payload.get("taskContract"), source_task_id, strict_plan=True)
+    if issue:
+        return fail(issue)
+    print(json.dumps({
+        "ok": True,
+        "mode": "repair",
+        "sourceTaskId": source_task_id,
+        "sourceAttemptNumber": source_attempt,
+    }))
+    return 0
+
+
 def main() -> int:
-    if len(sys.argv) not in (2, 3):
+    repair_mode = len(sys.argv) == 3 and sys.argv[1] == "--repair"
+    if not repair_mode and len(sys.argv) not in (2, 3):
         print(
-            "usage: validate_decomposition_json.py <decomposition.json> [max_task_count]",
+            "usage: validate_decomposition_json.py <decomposition.json> [max_task_count]\n"
+            "       validate_decomposition_json.py --repair <task-repair-result.json>",
             file=sys.stderr,
         )
         return 2
 
-    path = Path(sys.argv[1])
-    max_tasks = int(sys.argv[2]) if len(sys.argv) == 3 else None
+    path = Path(sys.argv[2] if repair_mode else sys.argv[1])
+    max_tasks = int(sys.argv[2]) if not repair_mode and len(sys.argv) == 3 else None
 
     with path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
+
+    if repair_mode:
+        return validate_repair_payload(payload)
 
     if payload.get("kind") != "decomposition_result":
         return fail("kind must be decomposition_result")
@@ -190,17 +343,9 @@ def main() -> int:
                     return fail(f"escaped glob found in {field}: {item}")
         if contract_mode:
             task_contract = task["taskContract"]
-            if task_contract.get("version") != "task-contract.v1":
-                return fail(f"taskContract.version must be task-contract.v1 for {task_id}")
-            for field in ("writableFiles", "proofFiles", "createdFileGlobs", "readOnlyAnchors", "outputArtifacts", "provides", "consumes"):
-                values = task_contract.get(field, [])
-                if not isinstance(values, list):
-                    return fail(f"taskContract.{field} must be a list for {task_id}")
-                for item in values:
-                    if not isinstance(item, str):
-                        return fail(f"taskContract.{field} must contain only strings for {task_id}")
-                    if "\\*\\*" in item:
-                        return fail(f"escaped glob found in taskContract.{field}: {item}")
+            local_issue = validate_task_contract_local(task_contract, task_id)
+            if local_issue:
+                return fail(local_issue)
             writable_files = list(task_contract.get("writableFiles", []))
             proof_files = list(task_contract.get("proofFiles", []))
             read_only_anchors = list(task_contract.get("readOnlyAnchors", []))

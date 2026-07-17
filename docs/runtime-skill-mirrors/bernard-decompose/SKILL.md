@@ -97,6 +97,30 @@ Do not decompose agent tasks that ask William to:
 
 Those stay in the harness.
 
+## Task contract repair mode
+
+When Mission Control assigns a task-level contract repair, repair only the named source task. Do not
+redecompose the objective and do not modify product files.
+
+The returned `task_repair_result` must contain the source task id, source attempt number, and one
+complete `task-contract.v1`. Build its `executionPlan` from the source contract and originating
+findings using this order:
+
+1. `inspect_authority` reads the declared authority root or consumed evidence.
+2. `derive_delta` identifies the exact change required by the findings.
+3. `apply_change` writes only the mutation root.
+4. `verify` proves the acceptance hinge through the proof root.
+
+Before returning the result:
+
+1. write the exact candidate JSON to a temporary file;
+2. run `python3 scripts/validate_decomposition_json.py --repair <task-repair-result.json>`;
+3. fix the candidate locally until validation passes;
+4. emit only the validated JSON.
+
+Never return an unvalidated repair. Mission Control remains the final authority and will compile and
+lint the repaired task against the complete objective graph before applying it.
+
 ## Hard Constraints
 
 1. Max 7 child tasks per objective unless an objective-specific exception is explicitly stated in the objective payload. Current approved exception: objective `4009e581-7231-4930-9a0d-b2b56b281d9e` may use **33** child tasks one time: **32 execution slices plus 1 gate-review task**. This preserves separate task API, objective API, worker-handler, and readiness/promotion parity contract/proof slices; shared task/objective taxonomy; separate release/activation/escalation taxonomy roots; separate schema-model and migration roots; repository boundary; storage exports; canonical writer; identity/correlation mapping; separate task API and objective API emitter roots; separate worker-handler and readiness/promotion emitter roots; separated release/activation/escalation emitter families; readback query work; readback API/proof work; durable duplicate prevention; bounded backfill; docs; and gate review as semantically bounded surfaces instead of rebundling known-risk work.
