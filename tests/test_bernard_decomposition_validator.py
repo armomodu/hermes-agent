@@ -32,7 +32,10 @@ def task_contract(root: str) -> dict:
         "outputArtifacts": [],
         "provides": [],
         "consumes": [],
-        "verification": {},
+        "verification": {
+            "focusedTests": ["apps/mission-control/src/lib/knowledge-plane/__tests__/release.test.ts"],
+            "qualityGates": ["software_test"],
+        },
         "executionPlan": {
             "version": "task-execution-plan.v1",
             "outcome": "Project release authority into the bounded release contract",
@@ -130,6 +133,24 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(payload, "--repair")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("escapes mutationRoot and proofRoot", result.stderr)
+
+    def test_repair_with_markdown_only_software_test_fails(self) -> None:
+        payload = repair_payload()
+        payload["taskContract"]["proofRoot"] = "apps/mission-control/docs/proof.md"
+        payload["taskContract"]["proofFiles"] = ["apps/mission-control/docs/proof.md"]
+        payload["taskContract"]["createdFileGlobs"] = ["apps/mission-control/docs/proof.md"]
+        result = self.run_validator(payload, "--repair")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("contains no executable test path", result.stderr)
+
+    def test_repair_with_markdown_evidence_without_software_test_passes(self) -> None:
+        payload = repair_payload()
+        payload["taskContract"]["proofRoot"] = "apps/mission-control/docs/proof.md"
+        payload["taskContract"]["proofFiles"] = ["apps/mission-control/docs/proof.md"]
+        payload["taskContract"]["createdFileGlobs"] = ["apps/mission-control/docs/proof.md"]
+        payload["taskContract"]["verification"] = {"focusedTests": [], "qualityGates": []}
+        result = self.run_validator(payload, "--repair")
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_full_decomposition_still_passes(self) -> None:
         execution_id = str(uuid.uuid4())

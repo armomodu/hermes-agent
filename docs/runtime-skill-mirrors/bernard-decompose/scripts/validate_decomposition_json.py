@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -114,6 +115,14 @@ def _path_within_root(path: str, root: str) -> bool:
     )
 
 
+def _is_executable_software_test_proof(path: str) -> bool:
+    normalized = path.strip().replace("\\", "/").removeprefix("./")
+    return bool(
+        re.search(r"(?:^|/)__tests__/.+\.[cm]?[jt]sx?$", normalized)
+        or re.search(r"\.(?:test|spec)\.[cm]?[jt]sx?$", normalized, re.IGNORECASE)
+    )
+
+
 def _execution_plan_reference_valid(reference: str, task_contract: dict) -> bool:
     if reference in ("authorityRoot", "mutationRoot", "proofRoot"):
         return bool(str(task_contract.get(reference) or "").strip())
@@ -161,6 +170,21 @@ def validate_task_contract_local(
                 return f"taskContract.{field} must contain only strings for {task_id}"
             if "\\*\\*" in item:
                 return f"escaped glob found in taskContract.{field}: {item}"
+
+    verification = task_contract.get("verification", {})
+    if not isinstance(verification, dict):
+        return f"taskContract.verification must be an object for {task_id}"
+    proof_files = normalized_string_list(task_contract.get("proofFiles"))
+    quality_gates = normalized_string_list(verification.get("qualityGates"))
+    if (
+        proof_files
+        and "software_test" in quality_gates
+        and not any(_is_executable_software_test_proof(path) for path in proof_files)
+    ):
+        return (
+            f"taskContract.verification.qualityGates requests software_test but "
+            f"taskContract.proofFiles contains no executable test path for {task_id}"
+        )
     for field, root_field in (
         ("writableFiles", "mutationRoot"),
         ("proofFiles", "proofRoot"),

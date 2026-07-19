@@ -118,6 +118,11 @@ Before returning the result:
 3. fix the candidate locally until validation passes;
 4. return the exact validated file contents byte-for-byte; do not reconstruct, wrap, or append to the JSON.
 
+Proof gates must match their declared proof files. If `verification.qualityGates` includes
+`software_test` and `proofFiles` is non-empty, at least one proof must be an executable
+`*.test.*`, `*.spec.*`, or `__tests__/**` path. Markdown and other evidence files remain valid
+without `software_test`, or alongside a separate executable proof.
+
 Never return an unvalidated repair. Mission Control remains the final authority and will compile and
 lint the repaired task against the complete objective graph before applying it.
 
