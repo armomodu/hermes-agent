@@ -279,16 +279,21 @@ def validate_repair_payload(payload: object) -> int:
 
 def main() -> int:
     repair_mode = len(sys.argv) == 3 and sys.argv[1] == "--repair"
-    if not repair_mode and len(sys.argv) not in (2, 3):
+    contract_required = len(sys.argv) in (3, 4) and sys.argv[1] == "--contract-required"
+    if not repair_mode and not contract_required and len(sys.argv) not in (2, 3):
         print(
             "usage: validate_decomposition_json.py <decomposition.json> [max_task_count]\n"
+            "       validate_decomposition_json.py --contract-required <decomposition.json> [max_task_count]\n"
             "       validate_decomposition_json.py --repair <task-repair-result.json>",
             file=sys.stderr,
         )
         return 2
 
-    path = Path(sys.argv[2] if repair_mode else sys.argv[1])
-    max_tasks = int(sys.argv[2]) if not repair_mode and len(sys.argv) == 3 else None
+    path = Path(sys.argv[2] if (repair_mode or contract_required) else sys.argv[1])
+    max_arg = sys.argv[3] if contract_required and len(sys.argv) == 4 else (
+        sys.argv[2] if not contract_required and not repair_mode and len(sys.argv) == 3 else None
+    )
+    max_tasks = int(max_arg) if max_arg is not None else None
 
     with path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -324,6 +329,8 @@ def main() -> int:
 
     for task in tasks:
         contract_mode = isinstance(task.get("taskContract"), dict)
+        if contract_required and not contract_mode:
+            return fail(f"taskContract is required for contract-mode task {task.get('id', '<missing-id>')}")
         required_fields = CONTRACT_MODE_REQUIRED_TASK_FIELDS if contract_mode else REQUIRED_TASK_FIELDS
 
         for field in required_fields:
@@ -372,7 +379,11 @@ def main() -> int:
                     return fail(f"escaped glob found in {field}: {item}")
         if contract_mode:
             task_contract = task["taskContract"]
-            local_issue = validate_task_contract_local(task_contract, task_id)
+            local_issue = validate_task_contract_local(
+                task_contract,
+                task_id,
+                strict_plan=contract_required,
+            )
             if local_issue:
                 return fail(local_issue)
             writable_files = list(task_contract.get("writableFiles", []))

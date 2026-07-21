@@ -74,6 +74,29 @@ Optimize for:
 - minimal tool usage
 - immediate termination once valid JSON is ready
 
+## General contract-mode rule
+
+For every software or product-system objective whose `decompositionContract.taskContractRequired`
+is `true`, every emitted child task must use `task-contract.v1`. Legacy-only tasks are forbidden.
+This is the default path for new factory objectives; the 1A.1 helper remains only its deterministic
+exception.
+
+Each contract task must declare one `mutationRoot`, one `authorityRoot`, one `proofRoot`, one
+`acceptanceHinge`, bounded writable/proof/read-only paths, and an ordered `executionPlan`. Use named
+`provides` and `consumes` tokens whenever a downstream slice relies on evidence or output owned by
+another slice. Split schema-model and migration ownership, proof-only work, storage boundaries, API
+routes, and documentation when they have independently mutable roots. A final bounded integration
+proof must complete before the single `gate_review` task.
+
+Before submitting a contract-required graph:
+
+1. write the exact `decomposition_result` JSON to a temporary file;
+2. run `python3 scripts/validate_decomposition_json.py --contract-required <file> <maxTaskCount>`;
+3. fix every local finding;
+4. submit the exact validated payload once.
+
+Do not fall back to legacy prose if validation fails. Block with the validator finding instead.
+
 ## Current Workflow Contract
 
 - Hermes Kanban is the execution inbox for agent work.
@@ -145,7 +168,7 @@ lint the repaired task against the complete objective graph before applying it.
    - `assignee`
    - `priority`
    - `nextAction`
-   - `taskContract` for `4009e581-7231-4930-9a0d-b2b56b281d9e`
+   - `taskContract` whenever the objective requires contract mode, including all new software objectives
 
 For `4009e581-7231-4930-9a0d-b2b56b281d9e`, Mission Control compiles `summary`,
 `acceptanceCriteria`, `constraints`, `relatedFiles`, `artifactPaths`, and

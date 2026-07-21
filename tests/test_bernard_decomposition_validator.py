@@ -194,6 +194,65 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["taskCount"], 2)
 
+    def test_contract_required_rejects_legacy_task(self) -> None:
+        payload = {
+            "kind": "decomposition_result",
+            "actor": "Bernard",
+            "requestReview": True,
+            "tasks": [{
+                "id": str(uuid.uuid4()),
+                "title": "Legacy task",
+                "assignee": "William",
+                "taskType": "execution",
+                "priority": "P1",
+                "nextAction": "Start",
+                "summary": "Legacy",
+                "acceptanceCriteria": "Legacy",
+                "constraints": "Legacy",
+                "relatedFiles": ["apps/mission-control/src/legacy.ts"],
+            }],
+        }
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("taskContract is required", result.stderr)
+
+    def test_contract_required_enforces_strict_execution_plan_references(self) -> None:
+        execution_id = str(uuid.uuid4())
+        review_id = str(uuid.uuid4())
+        execution_contract = task_contract("apps/mission-control/src/lib/knowledge-plane/contracts")
+        execution_contract["executionPlan"]["steps"][0]["references"] = ["siblingRoot"]
+        review_contract = task_contract("apps/mission-control/src/lib/knowledge-plane/__tests__")
+        payload = {
+            "kind": "decomposition_result",
+            "actor": "Bernard",
+            "requestReview": True,
+            "tasks": [
+                {
+                    "id": execution_id,
+                    "title": "Contract slice",
+                    "assignee": "William",
+                    "taskType": "execution",
+                    "priority": "P1",
+                    "nextAction": "Execute",
+                    "taskContract": execution_contract,
+                },
+                {
+                    "id": review_id,
+                    "title": "Gate review",
+                    "assignee": "Bernard",
+                    "taskType": "review",
+                    "reviewMode": "gate_review",
+                    "priority": "P1",
+                    "nextAction": "Review",
+                    "dependsOn": [execution_id],
+                    "taskContract": review_contract,
+                },
+            ],
+        }
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unresolved reference", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
