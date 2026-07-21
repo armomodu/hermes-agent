@@ -88,6 +88,18 @@ another slice. Split schema-model and migration ownership, proof-only work, stor
 routes, and documentation when they have independently mutable roots. A final bounded integration
 proof must complete before the single `gate_review` task.
 
+Contract-required shaping is literal:
+
+- normal implementation slices never create or write their `proofFiles`; when new proof is needed,
+  split a proof-only task whose `mutationRoot` equals `proofRoot` and whose writable scope is the
+  exact proof file set;
+- broad proof globs such as `__tests__/**` are never writable or created scope for a production slice;
+- no path may appear in both `readOnlyAnchors` and writable/created scope;
+- every consumed evidence token has an explicit `dependsOn` edge to its provider;
+- exactly one final execution task declares `primaryArtifactClass="integration_proof"`, depends on
+  every preceding execution slice, and precedes the gate review;
+- the `gate_review` contract is read-only: it has no writable or created-file scope.
+
 Before submitting a contract-required graph:
 
 1. write the exact `decomposition_result` JSON to a temporary file;

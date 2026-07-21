@@ -85,6 +85,94 @@ def repair_payload() -> dict:
     }
 
 
+def contract_required_payload() -> dict:
+    implementation_id = str(uuid.uuid4())
+    proof_id = str(uuid.uuid4())
+    integration_id = str(uuid.uuid4())
+    review_id = str(uuid.uuid4())
+    implementation = task_contract("apps/mission-control/src/lib/knowledge-plane/contracts")
+    implementation["createdFileGlobs"] = []
+    implementation["proofFiles"] = [
+        "apps/mission-control/src/lib/knowledge-plane/__tests__/existing-release.test.ts"
+    ]
+    implementation["provides"] = ["release-contract-v1"]
+
+    proof = task_contract("apps/mission-control/src/lib/knowledge-plane/__tests__")
+    proof_file = "apps/mission-control/src/lib/knowledge-plane/__tests__/release-proof.test.ts"
+    proof["mutationRoot"] = proof_file
+    proof["proofRoot"] = proof_file
+    proof["writableFiles"] = [proof_file]
+    proof["proofFiles"] = [proof_file]
+    proof["createdFileGlobs"] = [proof_file]
+    proof["consumes"] = ["release-contract-v1"]
+    proof["provides"] = ["release-proof-v1"]
+
+    integration = copy.deepcopy(proof)
+    integration_file = "apps/mission-control/src/lib/knowledge-plane/__tests__/release-integration.test.ts"
+    integration["primaryArtifactClass"] = "integration_proof"
+    integration["mutationRoot"] = integration_file
+    integration["proofRoot"] = integration_file
+    integration["writableFiles"] = [integration_file]
+    integration["proofFiles"] = [integration_file]
+    integration["createdFileGlobs"] = [integration_file]
+    integration["consumes"] = ["release-contract-v1", "release-proof-v1"]
+
+    review = copy.deepcopy(integration)
+    review["writableFiles"] = []
+    review["createdFileGlobs"] = []
+    review["proofFiles"] = [integration_file]
+    review["primaryArtifactClass"] = "review_gate"
+    review["consumes"] = []
+
+    return {
+        "kind": "decomposition_result",
+        "actor": "Bernard",
+        "requestReview": True,
+        "tasks": [
+            {
+                "id": implementation_id,
+                "title": "Author release contract",
+                "assignee": "William",
+                "taskType": "execution",
+                "priority": "P1",
+                "nextAction": "Execute",
+                "taskContract": implementation,
+            },
+            {
+                "id": proof_id,
+                "title": "Prove release contract",
+                "assignee": "William",
+                "taskType": "execution",
+                "priority": "P1",
+                "nextAction": "Prove",
+                "dependsOn": [implementation_id],
+                "taskContract": proof,
+            },
+            {
+                "id": integration_id,
+                "title": "Run final integration proof",
+                "assignee": "William",
+                "taskType": "execution",
+                "priority": "P1",
+                "nextAction": "Integrate",
+                "dependsOn": [implementation_id, proof_id],
+                "taskContract": integration,
+            },
+            {
+                "id": review_id,
+                "title": "Gate review",
+                "assignee": "Bernard",
+                "taskType": "review",
+                "reviewMode": "gate_review",
+                "priority": "P1",
+                "nextAction": "Review",
+                "dependsOn": [implementation_id, proof_id, integration_id],
+                "taskContract": review,
+            },
+        ],
+    }
+
+
 class BernardDecompositionValidatorTest(unittest.TestCase):
     def run_validator(self, payload: dict, *args: str) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -132,7 +220,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         payload["taskContract"]["createdFileGlobs"] = ["apps/mission-control/src/app/api/unrelated.ts"]
         result = self.run_validator(payload, "--repair")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("escapes mutationRoot and proofRoot", result.stderr)
+        self.assertIn("escapes mutationRoot", result.stderr)
 
     def test_repair_with_markdown_only_software_test_fails(self) -> None:
         payload = repair_payload()
@@ -252,6 +340,35 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unresolved reference", result.stderr)
+
+    def test_contract_required_accepts_bounded_proof_integration_and_read_only_gate(self) -> None:
+        result = self.run_validator(contract_required_payload(), "--contract-required")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_contract_required_rejects_proof_creation_in_normal_slice(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][0]["taskContract"]["createdFileGlobs"] = [
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/**"
+        ]
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("escapes mutationRoot", result.stderr)
+
+    def test_contract_required_rejects_read_only_writable_overlap(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        contract["readOnlyAnchors"] = [contract["writableFiles"][0]]
+        contract["authorityRoot"] = contract["mutationRoot"]
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("readOnlyAnchors overlaps writable scope", result.stderr)
+
+    def test_contract_required_rejects_missing_integration_proof(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][2]["taskContract"]["primaryArtifactClass"] = "proof"
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exactly one integration_proof", result.stderr)
 
 
 if __name__ == "__main__":

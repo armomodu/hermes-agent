@@ -115,6 +115,18 @@ def _path_within_root(path: str, root: str) -> bool:
     )
 
 
+def _has_glob(path: str) -> bool:
+    return any(marker in path for marker in ("*", "?", "[", "]", "{", "}"))
+
+
+def _is_exact_file_path(path: str) -> bool:
+    return bool(path.strip()) and not _has_glob(path) and "." in path.rstrip("/").split("/")[-1]
+
+
+def _patterns_overlap(left: str, right: str) -> bool:
+    return _path_within_root(left, right) or _path_within_root(right, left)
+
+
 def _is_executable_software_test_proof(path: str) -> bool:
     normalized = path.strip().replace("\\", "/").removeprefix("./")
     return bool(
@@ -142,6 +154,7 @@ def validate_task_contract_local(
     task_id: str,
     *,
     strict_plan: bool = False,
+    allow_read_only: bool = False,
 ) -> str | None:
     if not isinstance(task_contract, dict):
         return f"taskContract must be an object for {task_id}"
@@ -171,6 +184,15 @@ def validate_task_contract_local(
             if "\\*\\*" in item:
                 return f"escaped glob found in taskContract.{field}: {item}"
 
+    writable_files = normalized_string_list(task_contract.get("writableFiles"))
+    created_file_globs = normalized_string_list(task_contract.get("createdFileGlobs"))
+    read_only_anchors = normalized_string_list(task_contract.get("readOnlyAnchors"))
+    if not writable_files and not allow_read_only:
+        return f"taskContract.writableFiles is required for executable task {task_id}"
+    for anchor in read_only_anchors:
+        if any(_patterns_overlap(anchor, path) for path in writable_files + created_file_globs):
+            return f"taskContract.readOnlyAnchors overlaps writable scope for {task_id}: {anchor}"
+
     verification = task_contract.get("verification", {})
     if not isinstance(verification, dict):
         return f"taskContract.verification must be an object for {task_id}"
@@ -193,12 +215,14 @@ def validate_task_contract_local(
         for item in normalized_string_list(task_contract.get(field)):
             if not _path_within_root(item, roots[root_field]):
                 return f"taskContract.{field} escapes {root_field} for {task_id}: {item} not under {roots[root_field]}"
-    for item in normalized_string_list(task_contract.get("createdFileGlobs")):
-        if not (
-            _path_within_root(item, roots["mutationRoot"])
-            or _path_within_root(item, roots["proofRoot"])
-        ):
-            return f"taskContract.createdFileGlobs escapes mutationRoot and proofRoot for {task_id}: {item}"
+    for item in created_file_globs:
+        exact_proof_creation = (
+            _is_exact_file_path(item)
+            and _path_within_root(item, roots["proofRoot"])
+            and item in proof_files
+        )
+        if not _path_within_root(item, roots["mutationRoot"]) and not exact_proof_creation:
+            return f"taskContract.createdFileGlobs escapes mutationRoot for {task_id}: {item}"
     execution_plan = task_contract.get("executionPlan")
     if not isinstance(execution_plan, dict):
         return f"taskContract.executionPlan is required for {task_id}"
@@ -383,6 +407,7 @@ def main() -> int:
                 task_contract,
                 task_id,
                 strict_plan=contract_required,
+                allow_read_only=task["taskType"] == "review" and task.get("reviewMode") == "gate_review",
             )
             if local_issue:
                 return fail(local_issue)
@@ -407,6 +432,12 @@ def main() -> int:
             semantic_hinge = str(task_contract.get("semanticHinge", "")).lower()
             title_lower = str(task.get("title", "")).lower()
             proof_only = "prove " in title_lower and " exact parity " in title_lower
+            proof_only = proof_only or (
+                str(task_contract.get("mutationRoot") or "").strip()
+                == str(task_contract.get("proofRoot") or "").strip()
+                and sorted(writable_files) == sorted(proof_files)
+                and bool(proof_files)
+            )
             if proof_only:
                 if sorted(writable_files) != sorted(proof_files):
                     return fail(
@@ -417,6 +448,26 @@ def main() -> int:
                 leaked_tests = [path for path in writable_files if "/__tests__/" in path]
                 if leaked_tests:
                     return fail(f"William writable scope must not include test globs/files for {task_id}: {leaked_tests}")
+                proof_creations = [
+                    path
+                    for path in normalized_string_list(task_contract.get("createdFileGlobs"))
+                    if _path_within_root(path, str(task_contract.get("proofRoot") or ""))
+                ]
+                if contract_required and proof_creations:
+                    return fail(
+                        f"normal William task must not create proof files; split proof ownership for {task_id}: "
+                        f"{proof_creations}"
+                    )
+
+            if contract_required:
+                dependency_ids = set(task.get("dependsOn", []) or [])
+                for token in normalized_string_list(task_contract.get("consumes")):
+                    provider_ids = [provider_id for provider_id in providers.get(token, []) if provider_id != task_id]
+                    if not provider_ids or not dependency_ids.intersection(provider_ids):
+                        return fail(
+                            f"taskContract.consumes token {token} requires explicit dependsOn provider for {task_id}: "
+                            f"providers={provider_ids}"
+                        )
 
             if task.get("assignee") == "William":
                 clusters = sorted(
@@ -518,6 +569,30 @@ def main() -> int:
     missing = execution_ids - gate_deps
     if missing:
         return fail(f"gate_review missing execution dependencies: {sorted(missing)}")
+
+    if contract_required:
+        integration_tasks = [
+            task
+            for task in tasks
+            if task.get("taskType") == "execution"
+            and isinstance(task.get("taskContract"), dict)
+            and task["taskContract"].get("primaryArtifactClass") == "integration_proof"
+        ]
+        if len(integration_tasks) != 1:
+            return fail(
+                f"contract-required graph must contain exactly one integration_proof task, found {len(integration_tasks)}"
+            )
+        integration = integration_tasks[0]
+        integration_id = integration["id"]
+        integration_dependencies = set(integration.get("dependsOn", []) or [])
+        missing_integration_dependencies = (execution_ids - {integration_id}) - integration_dependencies
+        if missing_integration_dependencies:
+            return fail(
+                "integration_proof missing execution dependencies: "
+                f"{sorted(missing_integration_dependencies)}"
+            )
+        if integration_id not in gate_deps:
+            return fail("gate_review must depend on the final integration_proof task")
 
     print(
         json.dumps(
