@@ -54,6 +54,8 @@ Hard boundaries:
 - One task owns one independently mutable production root.
 - Exact existing files are enumerated. A recursive writable glob is only for genuinely new files.
 - Normal implementation tasks do not write proof files and use `proofFiles=[]`.
+- A task with `proofFiles=[]` must not request `software_test`. Put executable tests and that gate on a
+  separate proof-only task, and keep every `focusedTests` path inside its declared `proofFiles`.
 - New or changed proof belongs to a proof-only task whose mutation and proof root are the exact proof
   file.
 - `readOnlyAnchors` never overlap writable or created scope.
@@ -106,6 +108,8 @@ Before expansion, verify:
 
 - every approved slice is represented;
 - every required ownership path has one owner;
+- every required documentation path has one exact `primaryArtifactClass=docs` owner without
+  `software_test` unless that task also owns executable proof;
 - storage persistence includes every named adapter and export surface;
 - schema and migration are separate;
 - proof tasks own only their exact proof file;

@@ -109,6 +109,10 @@ def contract_required_payload() -> dict:
     proof["writableFiles"] = [proof_file]
     proof["proofFiles"] = [proof_file]
     proof["createdFileGlobs"] = [proof_file]
+    proof["verification"] = {
+        "focusedTests": [proof_file],
+        "qualityGates": ["software_test"],
+    }
     proof["consumes"] = ["release-contract-v1"]
     proof["provides"] = ["release-proof-v1"]
 
@@ -120,6 +124,10 @@ def contract_required_payload() -> dict:
     integration["writableFiles"] = [integration_file]
     integration["proofFiles"] = [integration_file]
     integration["createdFileGlobs"] = [integration_file]
+    integration["verification"] = {
+        "focusedTests": [integration_file],
+        "qualityGates": ["software_test"],
+    }
     integration["consumes"] = ["release-contract-v1", "release-proof-v1"]
 
     review = copy.deepcopy(integration)
@@ -364,7 +372,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         payload["taskContract"]["createdFileGlobs"] = ["apps/mission-control/docs/proof.md"]
         result = self.run_validator(payload, "--repair")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("contains no executable test path", result.stderr)
+        self.assertIn("proof scope is empty, non-executable", result.stderr)
 
     def test_repair_with_markdown_evidence_without_software_test_passes(self) -> None:
         payload = repair_payload()
@@ -556,6 +564,28 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("split proof ownership", result.stderr)
+
+    def test_contract_required_rejects_software_test_without_proof_files(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        contract["proofFiles"] = []
+        contract["verification"] = {
+            "focusedTests": [],
+            "qualityGates": ["software_test"],
+        }
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("proof scope is empty", result.stderr)
+
+    def test_contract_required_rejects_focused_test_outside_proof_files(self) -> None:
+        payload = contract_required_payload()
+        proof_contract = payload["tasks"][1]["taskContract"]
+        proof_contract["verification"]["focusedTests"] = [
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/other.test.ts"
+        ]
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not authorize every focused test", result.stderr)
 
 
 if __name__ == "__main__":

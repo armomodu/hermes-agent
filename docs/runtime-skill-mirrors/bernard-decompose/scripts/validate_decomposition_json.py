@@ -227,15 +227,25 @@ def validate_task_contract_local(
     if not isinstance(verification, dict):
         return f"taskContract.verification must be an object for {task_id}"
     proof_files = normalized_string_list(task_contract.get("proofFiles"))
+    focused_tests = normalized_string_list(verification.get("focusedTests"))
     quality_gates = normalized_string_list(verification.get("qualityGates"))
     if (
-        proof_files
-        and "software_test" in quality_gates
-        and not any(_is_executable_software_test_proof(path) for path in proof_files)
+        "software_test" in quality_gates
+        and (
+            (strict_graph and not proof_files)
+            or (
+                proof_files
+                and not any(_is_executable_software_test_proof(path) for path in proof_files)
+            )
+            or (
+                strict_graph
+                and any(path not in proof_files for path in focused_tests)
+            )
+        )
     ):
         return (
             f"taskContract.verification.qualityGates requests software_test but "
-            f"taskContract.proofFiles contains no executable test path for {task_id}"
+            f"its proof scope is empty, non-executable, or does not authorize every focused test for {task_id}"
         )
     for field, root_field in (
         ("writableFiles", "mutationRoot"),
