@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Expand a compact contract slice manifest into a decomposition_result payload."""
+
+from __future__ import annotations
+
+import json
+import sys
+import uuid
+from pathlib import Path
+
+
+LIST_FIELDS = (
+    "writableFiles",
+    "createdFileGlobs",
+    "proofFiles",
+    "readOnlyAnchors",
+    "outputArtifacts",
+    "provides",
+    "consumes",
+)
+
+
+def fail(message: str) -> int:
+    print(f"INVALID MANIFEST: {message}", file=sys.stderr)
+    return 1
+
+
+def require_text(value: object, field: str, task_key: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} is required for {task_key}")
+    return value.strip()
+
+
+def require_string_list(value: object, field: str, task_key: str) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError(f"{field} must be a string list for {task_key}")
+    return [item.strip() for item in value]
+
+
+def build_execution_plan(contract: dict, plan: dict, task_key: str) -> dict:
+    consumes = require_string_list(contract.get("consumes", []), "contract.consumes", task_key)
+    derive_references = ["authorityRoot", "mutationRoot"]
+    derive_references.extend(f"consumedToken:{token}" for token in consumes)
+    return {
+        "version": "task-execution-plan.v1",
+        "outcome": require_text(plan.get("outcome"), "contract.plan.outcome", task_key),
+        "steps": [
+            {
+                "kind": "inspect_authority",
+                "instruction": require_text(plan.get("inspect"), "contract.plan.inspect", task_key),
+                "references": ["authorityRoot"],
+            },
+            {
+                "kind": "derive_delta",
+                "instruction": require_text(plan.get("derive"), "contract.plan.derive", task_key),
+                "references": derive_references,
+            },
+            {
+                "kind": "apply_change",
+                "instruction": require_text(plan.get("apply"), "contract.plan.apply", task_key),
+                "references": ["mutationRoot"],
+            },
+            {
+                "kind": "verify",
+                "instruction": require_text(plan.get("verify"), "contract.plan.verify", task_key),
+                "references": ["proofRoot"],
+            },
+        ],
+        "expectedChanges": [
+            {
+                "target": "mutationRoot",
+                "operation": require_text(plan.get("operation"), "contract.plan.operation", task_key),
+                "symbols": require_string_list(plan.get("symbols"), "contract.plan.symbols", task_key),
+                "invariant": require_text(plan.get("invariant"), "contract.plan.invariant", task_key),
+            }
+        ],
+        "completionChecks": require_string_list(
+            plan.get("completionChecks"), "contract.plan.completionChecks", task_key
+        ),
+    }
+
+
+def expand_manifest(manifest: dict) -> dict:
+    if manifest.get("kind") != "contract-decomposition-manifest.v1":
+        raise ValueError("kind must be contract-decomposition-manifest.v1")
+    objective_id = require_text(manifest.get("objectiveId"), "objectiveId", "manifest")
+    namespace = uuid.UUID(objective_id)
+    slices = manifest.get("tasks")
+    if not isinstance(slices, list) or not slices:
+        raise ValueError("tasks must be a non-empty list")
+
+    keys = [require_text(item.get("key"), "key", "task") for item in slices if isinstance(item, dict)]
+    if len(keys) != len(slices) or len(set(keys)) != len(keys):
+        raise ValueError("every task key must be unique")
+    ids = {key: str(uuid.uuid5(namespace, key)) for key in keys}
+    tasks: list[dict] = []
+
+    for item in slices:
+        key = item["key"]
+        contract_input = item.get("contract")
+        if not isinstance(contract_input, dict):
+            raise ValueError(f"contract is required for {key}")
+        contract = {
+            "version": "task-contract.v1",
+            "semanticHinge": require_text(contract_input.get("semanticHinge"), "contract.semanticHinge", key),
+            "workflowFamily": require_text(contract_input.get("workflowFamily"), "contract.workflowFamily", key),
+            "mutationRoot": require_text(contract_input.get("mutationRoot"), "contract.mutationRoot", key),
+            "authorityRoot": require_text(contract_input.get("authorityRoot"), "contract.authorityRoot", key),
+            "proofRoot": require_text(contract_input.get("proofRoot"), "contract.proofRoot", key),
+            "acceptanceHinge": require_text(contract_input.get("acceptanceHinge"), "contract.acceptanceHinge", key),
+        }
+        for field in LIST_FIELDS:
+            contract[field] = require_string_list(contract_input.get(field, []), f"contract.{field}", key)
+        verification = contract_input.get("verification", {})
+        if not isinstance(verification, dict):
+            raise ValueError(f"contract.verification must be an object for {key}")
+        contract["verification"] = {
+            "focusedTests": require_string_list(
+                verification.get("focusedTests", []), "contract.verification.focusedTests", key
+            ),
+            "qualityGates": require_string_list(
+                verification.get("qualityGates", []), "contract.verification.qualityGates", key
+            ),
+        }
+        if "primaryArtifactClass" in contract_input:
+            contract["primaryArtifactClass"] = require_text(
+                contract_input["primaryArtifactClass"], "contract.primaryArtifactClass", key
+            )
+        plan = contract_input.get("plan")
+        if not isinstance(plan, dict):
+            raise ValueError(f"contract.plan is required for {key}")
+        contract["executionPlan"] = build_execution_plan(contract, plan, key)
+
+        dependency_keys = require_string_list(item.get("dependsOn", []), "dependsOn", key)
+        unknown = [dependency for dependency in dependency_keys if dependency not in ids]
+        if unknown:
+            raise ValueError(f"unknown dependsOn keys for {key}: {', '.join(unknown)}")
+        task = {
+            "id": ids[key],
+            "title": require_text(item.get("title"), "title", key),
+            "assignee": require_text(item.get("assignee"), "assignee", key),
+            "taskType": require_text(item.get("taskType"), "taskType", key),
+            "priority": require_text(item.get("priority"), "priority", key),
+            "nextAction": require_text(item.get("nextAction"), "nextAction", key),
+            "dependsOn": [ids[dependency] for dependency in dependency_keys],
+            "taskContract": contract,
+        }
+        if item.get("reviewMode"):
+            task["reviewMode"] = require_text(item["reviewMode"], "reviewMode", key)
+        tasks.append(task)
+
+    return {
+        "kind": "decomposition_result",
+        "objectiveId": objective_id,
+        "statusNote": require_text(manifest.get("statusNote"), "statusNote", "manifest"),
+        "requestReview": True,
+        "actor": "Bernard",
+        "tasks": tasks,
+    }
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        print("usage: build_contract_decomposition.py <manifest.json> <decomposition.json>", file=sys.stderr)
+        return 2
+    try:
+        manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+        payload = expand_manifest(manifest)
+        Path(sys.argv[2]).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        return fail(str(exc))
+    print(json.dumps({"ok": True, "taskCount": len(payload["tasks"]), "output": sys.argv[2]}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

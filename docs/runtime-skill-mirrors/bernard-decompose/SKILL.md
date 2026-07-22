@@ -116,14 +116,25 @@ Contract-required shaping is literal:
 
 Before submitting a contract-required graph:
 
-1. write the exact `decomposition_result` JSON to a temporary file;
-2. run `python3 scripts/validate_decomposition_json.py --contract-required <file> <maxTaskCount>`;
-3. fix every local finding;
-4. submit the exact validated payload once.
+1. author a compact `contract-decomposition-manifest.v1` slice matrix in `manifest.json`;
+2. run `python3 scripts/build_contract_decomposition.py manifest.json decomposition.json`;
+3. run `python3 scripts/validate_decomposition_json.py --contract-required decomposition.json <maxTaskCount>`;
+4. fix the manifest for every local finding, rebuild, and revalidate;
+5. submit the exact validated payload once.
+
+The manifest-first path is mandatory for non-1A.1 contract-required graphs with eight or more tasks.
+Do not read or summarize the validator source before authoring. The documented contract is the shaping
+guide and validator output is the mechanical feedback loop. The expander only removes repetitive JSON
+and creates deterministic task IDs and ordered plans; it does not replace the validator or Mission
+Control compiler/linter. Keep each manifest entry explicit about roots, bounded path lists, evidence
+tokens, dependencies, plan outcome/instructions, expected symbols, invariant, and completion checks.
+Start from the objective's required ownership paths and approved slices so no persistence surface is
+left implicit.
 
 Do not fall back to legacy prose if validation fails. Block with the validator finding instead.
 For non-1A.1 objectives, do not read or adapt `build_1a1_decomposition.py`; construct the general
-contract payload directly, validate it, and continue through submission in the same run.
+contract manifest, expand it with `build_contract_decomposition.py`, validate it, and continue through
+submission in the same run.
 
 ## Current Workflow Contract
 

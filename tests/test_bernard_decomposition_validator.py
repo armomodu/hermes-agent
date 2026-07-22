@@ -12,6 +12,10 @@ VALIDATOR = (
     REPO_ROOT
     / "docs/runtime-skill-mirrors/bernard-decompose/scripts/validate_decomposition_json.py"
 )
+CONTRACT_BUILDER = (
+    REPO_ROOT
+    / "docs/runtime-skill-mirrors/bernard-decompose/scripts/build_contract_decomposition.py"
+)
 
 
 def task_contract(root: str) -> dict:
@@ -173,6 +177,74 @@ def contract_required_payload() -> dict:
     }
 
 
+def compact_manifest() -> dict:
+    objective_id = str(uuid.uuid4())
+
+    def contract(root: str, proof: str, *, provides=None, consumes=None) -> dict:
+        return {
+            "semanticHinge": f"Own {root}",
+            "workflowFamily": "artifact-registry",
+            "mutationRoot": root,
+            "authorityRoot": "apps/mission-control/src/lib/storage/storage-adapter-interface.ts",
+            "proofRoot": proof,
+            "acceptanceHinge": f"{root} remains bounded and verifiable",
+            "writableFiles": [root],
+            "createdFileGlobs": [],
+            "proofFiles": [],
+            "readOnlyAnchors": ["apps/mission-control/src/lib/storage/storage-adapter-interface.ts"],
+            "outputArtifacts": [],
+            "provides": provides or [],
+            "consumes": consumes or [],
+            "verification": {"focusedTests": [], "qualityGates": []},
+            "plan": {
+                "outcome": f"Implement the bounded owner at {root}",
+                "inspect": "Inspect the declared storage authority.",
+                "derive": "Derive the exact missing ownership delta.",
+                "apply": "Apply only the bounded owner change.",
+                "verify": "Verify against the declared focused proof.",
+                "operation": "modify",
+                "symbols": ["artifactRegistryOwner"],
+                "invariant": "No sibling mutation root is changed.",
+                "completionChecks": ["The bounded owner is represented exactly once"],
+            },
+        }
+
+    first_root = "apps/mission-control/src/lib/storage/types.ts"
+    second_root = "apps/mission-control/src/lib/storage/file-storage-adapter.ts"
+    proof = "apps/mission-control/src/lib/knowledge-plane/__tests__/artifact-registry.test.ts"
+    return {
+        "kind": "contract-decomposition-manifest.v1",
+        "objectiveId": objective_id,
+        "statusNote": "Bounded artifact registry graph ready for review",
+        "tasks": [
+            {
+                "key": "types-owner",
+                "title": "Own artifact registry storage types",
+                "assignee": "William",
+                "taskType": "execution",
+                "priority": "P1",
+                "nextAction": "Execute the bounded plan",
+                "dependsOn": [],
+                "contract": contract(first_root, proof, provides=["artifact-registry-types-v1"]),
+            },
+            {
+                "key": "file-owner",
+                "title": "Own artifact registry file persistence",
+                "assignee": "William",
+                "taskType": "execution",
+                "priority": "P1",
+                "nextAction": "Execute after types authority exists",
+                "dependsOn": ["types-owner"],
+                "contract": contract(
+                    second_root,
+                    proof,
+                    consumes=["artifact-registry-types-v1"],
+                ),
+            },
+        ],
+    }
+
+
 class BernardDecompositionValidatorTest(unittest.TestCase):
     def run_validator(self, payload: dict, *args: str) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -190,6 +262,60 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(repair_payload(), "--repair")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["mode"], "repair")
+
+    def test_compact_manifest_expands_deterministically_with_ordered_plan(self) -> None:
+        manifest = compact_manifest()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "manifest.json"
+            first_output = Path(temp_dir) / "first.json"
+            second_output = Path(temp_dir) / "second.json"
+            source.write_text(json.dumps(manifest), encoding="utf-8")
+            first = subprocess.run(
+                ["python3", str(CONTRACT_BUILDER), str(source), str(first_output)],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            second = subprocess.run(
+                ["python3", str(CONTRACT_BUILDER), str(source), str(second_output)],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(first_output.read_text(), second_output.read_text())
+            payload = json.loads(first_output.read_text())
+            self.assertEqual(payload["kind"], "decomposition_result")
+            self.assertEqual(payload["tasks"][1]["dependsOn"], [payload["tasks"][0]["id"]])
+            plan = payload["tasks"][1]["taskContract"]["executionPlan"]
+            self.assertEqual(
+                [step["kind"] for step in plan["steps"]],
+                ["inspect_authority", "derive_delta", "apply_change", "verify"],
+            )
+            self.assertIn(
+                "consumedToken:artifact-registry-types-v1",
+                plan["steps"][1]["references"],
+            )
+
+    def test_compact_manifest_rejects_unknown_dependency_key(self) -> None:
+        manifest = compact_manifest()
+        manifest["tasks"][1]["dependsOn"] = ["missing-owner"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "manifest.json"
+            output = Path(temp_dir) / "decomposition.json"
+            source.write_text(json.dumps(manifest), encoding="utf-8")
+            result = subprocess.run(
+                ["python3", str(CONTRACT_BUILDER), str(source), str(output)],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unknown dependsOn keys", result.stderr)
 
     def test_repair_without_plan_fails(self) -> None:
         payload = repair_payload()
