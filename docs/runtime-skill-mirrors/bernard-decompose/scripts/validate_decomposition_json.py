@@ -33,6 +33,14 @@ CONTRACT_MODE_REQUIRED_TASK_FIELDS = (
     "taskContract",
 )
 
+GENERIC_AUTHORITY_ROOTS = {
+    ".",
+    "apps",
+    "apps/mission-control",
+    "apps/mission-control/src",
+    "apps/mission-control/src/lib",
+}
+
 
 def classify_writable_cluster(path: str) -> str | None:
     cleaned = path.replace("**", "").rstrip("/")
@@ -154,6 +162,7 @@ def validate_task_contract_local(
     task_id: str,
     *,
     strict_plan: bool = False,
+    strict_graph: bool = False,
     allow_read_only: bool = False,
 ) -> str | None:
     if not isinstance(task_contract, dict):
@@ -167,6 +176,8 @@ def validate_task_contract_local(
     for field, value in roots.items():
         if not value:
             return f"taskContract.{field} is required for {task_id}"
+    if strict_graph and roots["authorityRoot"].replace("/**", "").rstrip("/") in GENERIC_AUTHORITY_ROOTS:
+        return f"taskContract.authorityRoot is too broad for {task_id}: {roots['authorityRoot']}"
     for field in ("semanticHinge", "acceptanceHinge"):
         if not str(task_contract.get(field) or "").strip():
             return f"taskContract.{field} is required for {task_id}"
@@ -189,6 +200,16 @@ def validate_task_contract_local(
     read_only_anchors = normalized_string_list(task_contract.get("readOnlyAnchors"))
     if not writable_files and not allow_read_only:
         return f"taskContract.writableFiles is required for executable task {task_id}"
+    if (
+        strict_graph
+        and len(writable_files) == 1
+        and _is_exact_file_path(writable_files[0])
+        and roots["mutationRoot"].replace("/**", "").rstrip("/") != writable_files[0].rstrip("/")
+    ):
+        return (
+            f"taskContract.mutationRoot must equal its one exact writable file for {task_id}: "
+            f"{roots['mutationRoot']} != {writable_files[0]}"
+        )
     for anchor in read_only_anchors:
         if any(_patterns_overlap(anchor, path) for path in writable_files + created_file_globs):
             return f"taskContract.readOnlyAnchors overlaps writable scope for {task_id}: {anchor}"
@@ -407,6 +428,7 @@ def main() -> int:
                 task_contract,
                 task_id,
                 strict_plan=contract_required,
+                strict_graph=contract_required,
                 allow_read_only=task["taskType"] == "review" and task.get("reviewMode") == "gate_review",
             )
             if local_issue:
@@ -458,6 +480,18 @@ def main() -> int:
                         f"normal William task must not create proof files; split proof ownership for {task_id}: "
                         f"{proof_creations}"
                     )
+
+            if (
+                contract_required
+                and task.get("taskType") == "execution"
+                and not proof_only
+                and proof_files
+                and task_contract.get("primaryArtifactClass") != "docs"
+            ):
+                return fail(
+                    f"normal implementation task must not declare proofFiles; split proof ownership for {task_id}: "
+                    f"{proof_files}"
+                )
 
             if contract_required:
                 dependency_ids = set(task.get("dependsOn", []) or [])

@@ -91,10 +91,10 @@ def contract_required_payload() -> dict:
     integration_id = str(uuid.uuid4())
     review_id = str(uuid.uuid4())
     implementation = task_contract("apps/mission-control/src/lib/knowledge-plane/contracts")
+    implementation["mutationRoot"] = implementation["writableFiles"][0]
     implementation["createdFileGlobs"] = []
-    implementation["proofFiles"] = [
-        "apps/mission-control/src/lib/knowledge-plane/__tests__/existing-release.test.ts"
-    ]
+    implementation["proofFiles"] = []
+    implementation["verification"] = {"focusedTests": [], "qualityGates": []}
     implementation["provides"] = ["release-contract-v1"]
 
     proof = task_contract("apps/mission-control/src/lib/knowledge-plane/__tests__")
@@ -308,6 +308,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         execution_id = str(uuid.uuid4())
         review_id = str(uuid.uuid4())
         execution_contract = task_contract("apps/mission-control/src/lib/knowledge-plane/contracts")
+        execution_contract["mutationRoot"] = execution_contract["writableFiles"][0]
         execution_contract["executionPlan"]["steps"][0]["references"] = ["siblingRoot"]
         review_contract = task_contract("apps/mission-control/src/lib/knowledge-plane/__tests__")
         payload = {
@@ -369,6 +370,31 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("exactly one integration_proof", result.stderr)
+
+    def test_contract_required_rejects_generic_authority_root(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][0]["taskContract"]["authorityRoot"] = "apps/mission-control"
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("authorityRoot is too broad", result.stderr)
+
+    def test_contract_required_rejects_broad_root_for_one_exact_writable_file(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        contract["mutationRoot"] = "apps/mission-control/src/lib/knowledge-plane"
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must equal its one exact writable file", result.stderr)
+
+    def test_contract_required_rejects_proof_files_on_normal_implementation(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        contract["proofFiles"] = [
+            "apps/mission-control/src/lib/knowledge-plane/__tests__/invented.test.ts"
+        ]
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("split proof ownership", result.stderr)
 
 
 if __name__ == "__main__":

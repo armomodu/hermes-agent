@@ -93,7 +93,15 @@ Contract-required shaping is literal:
 - normal implementation slices never create or write their `proofFiles`; when new proof is needed,
   split a proof-only task whose `mutationRoot` equals `proofRoot` and whose writable scope is the
   exact proof file set;
+- normal implementation slices declare `proofFiles=[]` and do not request `software_test`; the
+  downstream proof-only slice consumes their named output and owns the executable proof;
 - broad proof globs such as `__tests__/**` are never writable or created scope for a production slice;
+- `authorityRoot` is the narrowest live authority root for the slice, never a repository or app root;
+- when a task writes one exact file, `mutationRoot` is that exact file, not its parent directory;
+- a shared storage-interface change enumerates every affected adapter implementation in
+  `writableFiles` and in the execution plan; do not leave an implementation outside ownership;
+- documentation slices use the canonical `primaryArtifactClass="docs"`; final proof uses
+  `primaryArtifactClass="integration_proof"`;
 - no path may appear in both `readOnlyAnchors` and writable/created scope;
 - every consumed evidence token has an explicit `dependsOn` edge to its provider;
 - exactly one final execution task declares `primaryArtifactClass="integration_proof"`, depends on
@@ -108,6 +116,8 @@ Before submitting a contract-required graph:
 4. submit the exact validated payload once.
 
 Do not fall back to legacy prose if validation fails. Block with the validator finding instead.
+For non-1A.1 objectives, do not read or adapt `build_1a1_decomposition.py`; construct the general
+contract payload directly, validate it, and continue through submission in the same run.
 
 ## Current Workflow Contract
 
