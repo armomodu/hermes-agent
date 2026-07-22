@@ -96,10 +96,14 @@ Contract-required shaping is literal:
 - normal implementation slices declare `proofFiles=[]` and do not request `software_test`; the
   downstream proof-only slice consumes their named output and owns the executable proof;
 - broad proof globs such as `__tests__/**` are never writable or created scope for a production slice;
+- every contract-required `proofRoot` names one exact proof path; normal implementation slices point
+  to their downstream focused or integration proof without owning that file;
 - `authorityRoot` is the narrowest live authority root for the slice, never a repository or app root;
 - when a task writes one exact file, `mutationRoot` is that exact file, not its parent directory;
-- a shared storage-interface change enumerates every affected adapter implementation in
-  `writableFiles` and in the execution plan; do not leave an implementation outside ownership;
+- recursive writable globs may authorize newly created module files, but may not stand in for
+  existing-file ownership; enumerate and split independently mutable existing files;
+- a shared storage-interface change gives the interface and every affected adapter implementation
+  separate exact-file ownership tasks; do not leave file, hosted, hybrid, or export surfaces implicit;
 - documentation slices use the canonical `primaryArtifactClass="docs"`; final proof uses
   `primaryArtifactClass="integration_proof"`;
 - no path may appear in both `readOnlyAnchors` and writable/created scope;
@@ -107,6 +111,8 @@ Contract-required shaping is literal:
 - exactly one final execution task declares `primaryArtifactClass="integration_proof"`, depends on
   every preceding execution slice, and precedes the gate review;
 - the `gate_review` contract is read-only: it has no writable or created-file scope.
+- generic proof-only tasks do not invent JSON authority artifacts; JSON output is required only for
+  a real authority-extraction slice whose named evidence is consumed downstream.
 
 Before submitting a contract-required graph:
 

@@ -178,6 +178,8 @@ def validate_task_contract_local(
             return f"taskContract.{field} is required for {task_id}"
     if strict_graph and roots["authorityRoot"].replace("/**", "").rstrip("/") in GENERIC_AUTHORITY_ROOTS:
         return f"taskContract.authorityRoot is too broad for {task_id}: {roots['authorityRoot']}"
+    if strict_graph and not _is_exact_file_path(roots["proofRoot"]):
+        return f"taskContract.proofRoot must be one exact proof path for {task_id}: {roots['proofRoot']}"
     for field in ("semanticHinge", "acceptanceHinge"):
         if not str(task_contract.get(field) or "").strip():
             return f"taskContract.{field} is required for {task_id}"
@@ -210,6 +212,13 @@ def validate_task_contract_local(
             f"taskContract.mutationRoot must equal its one exact writable file for {task_id}: "
             f"{roots['mutationRoot']} != {writable_files[0]}"
         )
+    if strict_graph:
+        for writable_file in writable_files:
+            if "**" in writable_file and writable_file not in created_file_globs:
+                return (
+                    f"recursive writable scope over existing files is forbidden for {task_id}: "
+                    f"{writable_file}"
+                )
     for anchor in read_only_anchors:
         if any(_patterns_overlap(anchor, path) for path in writable_files + created_file_globs):
             return f"taskContract.readOnlyAnchors overlaps writable scope for {task_id}: {anchor}"
@@ -436,6 +445,7 @@ def main() -> int:
             writable_files = list(task_contract.get("writableFiles", []))
             proof_files = list(task_contract.get("proofFiles", []))
             read_only_anchors = list(task_contract.get("readOnlyAnchors", []))
+            output_artifacts = list(task_contract.get("outputArtifacts", []))
             authority_roots = sorted(
                 {
                     root
@@ -453,7 +463,8 @@ def main() -> int:
             effective_authority_roots = authority_roots or writable_authority_roots
             semantic_hinge = str(task_contract.get("semanticHinge", "")).lower()
             title_lower = str(task.get("title", "")).lower()
-            proof_only = "prove " in title_lower and " exact parity " in title_lower
+            authority_extraction = title_lower.startswith("extract ") and " authority facts" in title_lower
+            proof_only = authority_extraction or ("prove " in title_lower and " exact parity " in title_lower)
             proof_only = proof_only or (
                 str(task_contract.get("mutationRoot") or "").strip()
                 == str(task_contract.get("proofRoot") or "").strip()
@@ -466,6 +477,8 @@ def main() -> int:
                         f"proof-only task must keep writable scope equal to proof files for {task_id}: "
                         f"writable={writable_files} proof={proof_files}"
                     )
+                if authority_extraction and not any(str(item).endswith(".json") for item in output_artifacts):
+                    return fail(f"authority-extraction task must emit a json authority artifact for {task_id}")
             elif task.get("assignee") == "William":
                 leaked_tests = [path for path in writable_files if "/__tests__/" in path]
                 if leaked_tests:

@@ -21,7 +21,7 @@ def task_contract(root: str) -> dict:
         "workflowFamily": "contracts",
         "mutationRoot": root,
         "authorityRoot": "apps/mission-control/src/lib/release",
-        "proofRoot": "apps/mission-control/src/lib/knowledge-plane/__tests__",
+        "proofRoot": "apps/mission-control/src/lib/knowledge-plane/__tests__/release.test.ts",
         "acceptanceHinge": "The bounded contract matches release authority",
         "writableFiles": [f"{root}/release.ts"],
         "createdFileGlobs": [
@@ -386,12 +386,38 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must equal its one exact writable file", result.stderr)
 
+    def test_contract_required_rejects_broad_proof_root(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][0]["taskContract"]["proofRoot"] = (
+            "apps/mission-control/src/lib/knowledge-plane/__tests__"
+        )
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must be one exact proof path", result.stderr)
+
+    def test_contract_required_rejects_recursive_existing_writable_scope(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        contract["mutationRoot"] = "apps/mission-control/src/lib/knowledge-plane/contracts"
+        contract["writableFiles"] = [
+            "apps/mission-control/src/lib/knowledge-plane/contracts/**"
+        ]
+        contract["createdFileGlobs"] = []
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("recursive writable scope over existing files is forbidden", result.stderr)
+
+    def test_contract_required_generic_proof_does_not_require_json_authority_artifact(self) -> None:
+        payload = contract_required_payload()
+        proof_contract = payload["tasks"][1]["taskContract"]
+        proof_contract["outputArtifacts"] = ["Focused release proof"]
+        result = self.run_validator(payload, "--contract-required")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_contract_required_rejects_proof_files_on_normal_implementation(self) -> None:
         payload = contract_required_payload()
         contract = payload["tasks"][0]["taskContract"]
-        contract["proofFiles"] = [
-            "apps/mission-control/src/lib/knowledge-plane/__tests__/invented.test.ts"
-        ]
+        contract["proofFiles"] = [contract["proofRoot"]]
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("split proof ownership", result.stderr)
