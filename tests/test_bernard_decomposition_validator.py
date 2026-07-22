@@ -16,6 +16,7 @@ CONTRACT_BUILDER = (
     REPO_ROOT
     / "docs/runtime-skill-mirrors/bernard-decompose/scripts/build_contract_decomposition.py"
 )
+SKILL = REPO_ROOT / "docs/runtime-skill-mirrors/bernard-decompose/SKILL.md"
 
 
 def task_contract(root: str) -> dict:
@@ -262,6 +263,14 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(repair_payload(), "--repair")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["mode"], "repair")
+
+    def test_operational_skill_is_concise_and_manifest_first(self) -> None:
+        skill = SKILL.read_text(encoding="utf-8")
+        self.assertLess(len(skill.splitlines()), 250)
+        self.assertIn("build_contract_decomposition.py manifest.json decomposition.json", skill)
+        self.assertIn("Do not read validator source", skill)
+        self.assertIn("Every listed path must have exactly one explicit writable owner", skill)
+        self.assertIn("One final `integration_proof`", skill)
 
     def test_compact_manifest_expands_deterministically_with_ordered_plan(self) -> None:
         manifest = compact_manifest()
