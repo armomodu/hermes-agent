@@ -119,6 +119,12 @@ def record_build(
         if isinstance(task, dict) and str(task.get("key") or "").strip()
     )
     previous_task_keys = current.get("manifestTaskKeys") if same_objective else None
+    preserved_task_keys = (
+        sorted(set(previous_task_keys).intersection(task_keys))
+        if isinstance(previous_task_keys, list)
+        else []
+    )
+    full_regeneration = bool(previous_task_keys and task_keys and not preserved_task_keys)
     metrics = dict(current.get("metrics") or {}) if same_objective else {}
     if previous_digest and previous_digest != manifest_digest:
         correction_round += 1
@@ -150,11 +156,12 @@ def record_build(
             "manifestReuseCount": int(metrics.get("manifestReuseCount", 0))
             + (1 if previous_digest == manifest_digest else 0),
             "fullRegenerationCount": int(metrics.get("fullRegenerationCount", 0))
-            + (
-                1
-                if previous_task_keys
-                and sorted(previous_task_keys) != task_keys
-                else 0
+            + (1 if full_regeneration else 0),
+            "stableTaskIdentityCount": len(preserved_task_keys),
+            "stableTaskIdentityRate": (
+                len(preserved_task_keys) / len(previous_task_keys)
+                if isinstance(previous_task_keys, list) and previous_task_keys
+                else None
             ),
         },
     }

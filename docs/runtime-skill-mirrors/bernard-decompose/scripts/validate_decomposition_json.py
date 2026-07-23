@@ -147,6 +147,19 @@ def _path_within_root(path: str, root: str) -> bool:
     )
 
 
+def _compact_scope_roots(values: list[str]) -> list[str]:
+    roots = sorted(
+        {value.replace("/**", "").rstrip("/") for value in values if value.strip()},
+        key=lambda value: (len(value), value),
+    )
+    compacted: list[str] = []
+    for root in roots:
+        if any(_path_within_root(root, existing) for existing in compacted):
+            continue
+        compacted.append(root)
+    return compacted
+
+
 def _has_glob(path: str) -> bool:
     return any(marker in path for marker in ("*", "?", "[", "]", "{", "}"))
 
@@ -556,6 +569,16 @@ def collect_contract_required_findings(
             for token in normalized_string_list(contract.get("provides")):
                 providers.setdefault(token, []).append(task_id)
 
+    objective_contract = (
+        objective.get("decompositionContract")
+        if isinstance(objective, dict)
+        and isinstance(objective.get("decompositionContract"), dict)
+        else {}
+    )
+    objective_scope_clusters = _compact_scope_roots(
+        normalized_string_list(objective_contract.get("allowedExpansionZone"))
+        + normalized_string_list(objective_contract.get("sourceAnchors"))
+    )
     review_tasks: list[dict] = []
     execution_ids: set[str] = set()
     for task, task_id in zip(valid_tasks, task_ids):
@@ -699,6 +722,31 @@ def collect_contract_required_findings(
                     paths=writable_files,
                 )
             )
+        if (
+            task.get("assignee") == "William"
+            and len(clusters) <= 1
+            and len(objective_scope_clusters) > 1
+        ):
+            touched_clusters = sorted(
+                {
+                    cluster
+                    for cluster in objective_scope_clusters
+                    if any(
+                        _path_within_root(path, cluster)
+                        for path in writable_files + created_files
+                    )
+                }
+            )
+            if len(touched_clusters) > 1:
+                findings.append(
+                    _graph_finding(
+                        "multiple_mutation_clusters",
+                        "task",
+                        f"William writable scope spans multiple objective clusters for {task_id}: {touched_clusters}",
+                        task_id=task_id or None,
+                        paths=touched_clusters,
+                    )
+                )
         for token in normalized_string_list(contract.get("consumes")):
             provider_ids = [provider_id for provider_id in providers.get(token, []) if provider_id != task_id]
             linked = sorted(set(provider_ids).intersection(dependency_ids))

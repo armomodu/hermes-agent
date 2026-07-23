@@ -834,6 +834,51 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("implementation_owns_proof", result.stderr)
 
+    def test_contract_required_rejects_multiple_objective_storage_clusters(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        storage_paths = [
+            "apps/mission-control/src/lib/storage/types.ts",
+            "apps/mission-control/src/lib/storage/storage-adapter-interface.ts",
+        ]
+        contract["mutationRoot"] = "apps/mission-control/src/lib/storage"
+        contract["authorityRoot"] = storage_paths[0]
+        contract["proofRoot"] = storage_paths[0]
+        contract["writableFiles"] = storage_paths
+        contract["readOnlyAnchors"] = []
+        objective = {
+            "id": str(uuid.uuid4()),
+            "decompositionContract": {
+                "taskContractRequired": True,
+                "maxTaskCount": 8,
+                "allowedExpansionZone": storage_paths,
+                "sourceAnchors": storage_paths,
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload_path = Path(temp_dir) / "payload.json"
+            objective_path = Path(temp_dir) / "objective.json"
+            report_path = Path(temp_dir) / "report.json"
+            payload_path.write_text(json.dumps(payload), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(VALIDATOR),
+                    "--contract-required",
+                    str(payload_path),
+                    "--objective",
+                    str(objective_path),
+                    "--report",
+                    str(report_path),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("multiple_mutation_clusters", result.stderr)
+
     def test_contract_required_rejects_read_only_writable_overlap(self) -> None:
         payload = contract_required_payload()
         contract = payload["tasks"][0]["taskContract"]
