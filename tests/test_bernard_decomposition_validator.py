@@ -634,9 +634,15 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 json.loads((archive / "validator-report.json").read_text()),
                 json.loads(report_path.read_text()),
             )
+            archived_checkpoint = json.loads((archive / "checkpoint.json").read_text())
+            self.assertEqual(archived_checkpoint["checkpointStatus"], "accepted")
             self.assertEqual(
-                json.loads((archive / "checkpoint.json").read_text())["checkpointStatus"],
-                "accepted",
+                archived_checkpoint["metrics"]["terminalConvergenceRate"],
+                1.0,
+            )
+            self.assertEqual(
+                archived_checkpoint["metrics"]["averageCorrectionRounds"],
+                1.0,
             )
             metrics = subprocess.run(
                 ["python3", str(CHECKPOINT), "metrics"],

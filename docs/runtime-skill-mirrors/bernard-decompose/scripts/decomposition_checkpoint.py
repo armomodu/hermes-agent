@@ -48,6 +48,30 @@ def _finding_key(finding: object) -> str:
     )
 
 
+def _expose_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    exposed = dict(metrics)
+    builds = max(1, int(exposed.get("buildCount", 0)))
+    exposed["manifestReuseRate"] = int(exposed.get("manifestReuseCount", 0)) / builds
+    exposed["firstPassValidatorSuccessRate"] = (
+        1.0 if exposed.get("firstPassValidatorSuccess") else 0.0
+    )
+    exposed["terminalConvergenceRate"] = (
+        1.0 if exposed.get("terminalConverged") else 0.0
+    )
+    exposed["averageCorrectionRounds"] = (
+        float(exposed.get("terminalCorrectionRound", 0))
+        if exposed.get("terminalConverged")
+        else None
+    )
+    attempts = int(exposed.get("workspaceResumeAttempts", 0))
+    exposed["workspaceResumeSuccessRate"] = (
+        int(exposed.get("workspaceResumeSuccesses", 0)) / attempts
+        if attempts
+        else None
+    )
+    return exposed
+
+
 def checkpoint_path(workspace: Path | None = None) -> Path:
     return (workspace or Path.cwd()) / CHECKPOINT_NAME
 
@@ -244,35 +268,38 @@ def record_validation(
             "checkpointStatus": checkpoint_status,
         }
     )
+    next_metrics = _expose_metrics(
+        {
+            **metrics,
+            "validationRuns": validation_runs,
+            "firstPassValidatorSuccess": (
+                bool(report.get("ok"))
+                if validation_runs == 1
+                else metrics.get("firstPassValidatorSuccess")
+            ),
+            "lastFindingCodes": current_codes,
+            "lastFindingKeys": current_finding_keys,
+            "lastFindingCount": int(report.get("findingCount", 0)),
+            "lastCorrectionReducedFindings": correction_reduced_findings,
+            "lastCorrectionAccepted": correction_accepted,
+            "defectsIntroducedDuringCorrection": int(
+                metrics.get("defectsIntroducedDuringCorrection", 0)
+            ) + len(introduced),
+            "terminalConverged": bool(report.get("ok")),
+            "terminalCorrectionRound": (
+                int(current.get("correctionRound", 0))
+                if report.get("ok")
+                else metrics.get("terminalCorrectionRound")
+            ),
+        }
+    )
     current.update(
         {
             "checkpointStatus": checkpoint_status,
             "findingCount": int(report.get("findingCount", 0)),
             "retryContext": retry_context,
             "updatedAt": _iso(now),
-            "metrics": {
-                **metrics,
-                "validationRuns": validation_runs,
-                "firstPassValidatorSuccess": (
-                    bool(report.get("ok"))
-                    if validation_runs == 1
-                    else metrics.get("firstPassValidatorSuccess")
-                ),
-                "lastFindingCodes": current_codes,
-                "lastFindingKeys": current_finding_keys,
-                "lastFindingCount": int(report.get("findingCount", 0)),
-                "lastCorrectionReducedFindings": correction_reduced_findings,
-                "lastCorrectionAccepted": correction_accepted,
-                "defectsIntroducedDuringCorrection": int(
-                    metrics.get("defectsIntroducedDuringCorrection", 0)
-                ) + len(introduced),
-                "terminalConverged": bool(report.get("ok")),
-                "terminalCorrectionRound": (
-                    int(current.get("correctionRound", 0))
-                    if report.get("ok")
-                    else metrics.get("terminalCorrectionRound")
-                ),
-            },
+            "metrics": next_metrics,
         }
     )
     return _write_checkpoint(current, workspace)
@@ -335,26 +362,7 @@ def main() -> int:
             checkpoint = load_checkpoint(args.workspace)
             if not checkpoint:
                 raise ValueError(f"{CHECKPOINT_NAME} is missing or invalid")
-            metrics = dict(checkpoint.get("metrics") or {})
-            builds = max(1, int(metrics.get("buildCount", 0)))
-            metrics["manifestReuseRate"] = int(metrics.get("manifestReuseCount", 0)) / builds
-            metrics["firstPassValidatorSuccessRate"] = (
-                1.0 if metrics.get("firstPassValidatorSuccess") else 0.0
-            )
-            metrics["terminalConvergenceRate"] = (
-                1.0 if metrics.get("terminalConverged") else 0.0
-            )
-            metrics["averageCorrectionRounds"] = (
-                float(metrics.get("terminalCorrectionRound", 0))
-                if metrics.get("terminalConverged")
-                else None
-            )
-            attempts = int(metrics.get("workspaceResumeAttempts", 0))
-            metrics["workspaceResumeSuccessRate"] = (
-                int(metrics.get("workspaceResumeSuccesses", 0)) / attempts
-                if attempts
-                else None
-            )
+            metrics = _expose_metrics(dict(checkpoint.get("metrics") or {}))
             print(json.dumps(metrics, sort_keys=True))
             return 0
         print(json.dumps(mark_status(args.status, args.workspace), sort_keys=True))
