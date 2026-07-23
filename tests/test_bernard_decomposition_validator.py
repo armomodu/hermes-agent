@@ -648,8 +648,74 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             metric_payload = json.loads(metrics.stdout)
             self.assertFalse(metric_payload["firstPassValidatorSuccess"])
             self.assertEqual(metric_payload["terminalCorrectionRound"], 1)
+            self.assertEqual(metric_payload["firstPassValidatorSuccessRate"], 0.0)
+            self.assertEqual(metric_payload["terminalConvergenceRate"], 1.0)
+            self.assertEqual(metric_payload["averageCorrectionRounds"], 1.0)
             self.assertEqual(metric_payload["workspaceResumeSuccessRate"], 1.0)
             self.assertEqual(metric_payload["fullRegenerationCount"], 0)
+
+    def test_checkpoint_rejects_non_improving_correction_with_new_defect(self) -> None:
+        manifest, objective = convergence_manifest()
+        manifest["tasks"][0]["contract"]["authorityRoot"] = "apps/mission-control"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            manifest_path = workspace / "manifest.json"
+            objective_path = workspace / "objective.json"
+            decomposition_path = workspace / "decomposition.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            build = [
+                "python3",
+                str(CONTRACT_BUILDER),
+                str(manifest_path),
+                str(decomposition_path),
+                "--objective",
+                str(objective_path),
+            ]
+            validate = [
+                "python3",
+                str(VALIDATOR),
+                "--contract-required",
+                str(decomposition_path),
+                "8",
+                "--objective",
+                str(objective_path),
+                "--manifest",
+                str(manifest_path),
+            ]
+
+            self.assertEqual(
+                subprocess.run(build, cwd=workspace, capture_output=True, text=True).returncode,
+                0,
+            )
+            self.assertNotEqual(
+                subprocess.run(validate, cwd=workspace, capture_output=True, text=True).returncode,
+                0,
+            )
+
+            manifest["tasks"][0]["contract"]["authorityRoot"] = (
+                "apps/mission-control/src/lib/release/objective-release-service.ts"
+            )
+            manifest["tasks"][1]["contract"]["authorityRoot"] = "apps/mission-control"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            self.assertEqual(
+                subprocess.run(build, cwd=workspace, capture_output=True, text=True).returncode,
+                0,
+            )
+            self.assertNotEqual(
+                subprocess.run(validate, cwd=workspace, capture_output=True, text=True).returncode,
+                0,
+            )
+
+            checkpoint = json.loads((workspace / ".mc-decomposition-checkpoint.json").read_text())
+            self.assertEqual(checkpoint["checkpointStatus"], "correction_rejected")
+            self.assertFalse(checkpoint["metrics"]["lastCorrectionAccepted"])
+            self.assertFalse(checkpoint["metrics"]["lastCorrectionReducedFindings"])
+            self.assertGreater(checkpoint["metrics"]["defectsIntroducedDuringCorrection"], 0)
+            self.assertEqual(
+                checkpoint["retryContext"]["lastFindingCount"],
+                checkpoint["findingCount"],
+            )
 
     def test_repair_without_plan_fails(self) -> None:
         payload = repair_payload()
@@ -967,6 +1033,14 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("focused_test_outside_proof_scope", result.stderr)
+
+    def test_contract_required_rejects_dependency_cycles(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][0]["dependsOn"] = [payload["tasks"][1]["id"]]
+        payload["tasks"][1]["dependsOn"] = [payload["tasks"][0]["id"]]
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("dependency_cycle", result.stderr)
 
     def test_contract_required_reports_all_task_graph_and_coverage_findings_together(self) -> None:
         payload = contract_required_payload()

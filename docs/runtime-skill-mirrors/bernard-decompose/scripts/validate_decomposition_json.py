@@ -517,6 +517,57 @@ def _graph_finding(
     }
 
 
+def _find_dependency_cycles(tasks: list[dict]) -> list[list[str]]:
+    task_ids = {
+        str(task.get("id") or "").strip()
+        for task in tasks
+        if str(task.get("id") or "").strip()
+    }
+    dependencies = {
+        str(task.get("id") or "").strip(): sorted(
+            dependency
+            for dependency in normalized_string_list(task.get("dependsOn"))
+            if dependency != str(task.get("id") or "").strip()
+            and dependency in task_ids
+        )
+        for task in tasks
+        if str(task.get("id") or "").strip()
+    }
+    state: dict[str, str] = {}
+    stack: list[str] = []
+    cycle_keys: set[str] = set()
+    cycles: list[list[str]] = []
+
+    def record_cycle(cycle: list[str]) -> None:
+        nodes = cycle[:-1]
+        first = min(nodes)
+        first_index = nodes.index(first)
+        canonical_nodes = nodes[first_index:] + nodes[:first_index]
+        canonical_cycle = canonical_nodes + [canonical_nodes[0]]
+        key = "->".join(canonical_cycle)
+        if key not in cycle_keys:
+            cycle_keys.add(key)
+            cycles.append(canonical_cycle)
+
+    def visit(task_id: str) -> None:
+        if state.get(task_id) == "visited":
+            return
+        state[task_id] = "visiting"
+        stack.append(task_id)
+        for dependency_id in dependencies.get(task_id, []):
+            if state.get(dependency_id) == "visiting":
+                cycle_start = stack.index(dependency_id)
+                record_cycle(stack[cycle_start:] + [dependency_id])
+            else:
+                visit(dependency_id)
+        stack.pop()
+        state[task_id] = "visited"
+
+    for task_id in sorted(dependencies):
+        visit(task_id)
+    return sorted(cycles, key=lambda cycle: "->".join(cycle))
+
+
 def collect_contract_required_findings(
     payload: object,
     *,
@@ -778,6 +829,17 @@ def collect_contract_required_findings(
                         paths=writable_truth,
                     )
                 )
+
+    for cycle in _find_dependency_cycles(valid_tasks):
+        findings.append(
+            _graph_finding(
+                "dependency_cycle",
+                "dependency_graph",
+                f"task dependencies contain a cycle: {' -> '.join(cycle)}",
+                task_id=cycle[0],
+                dependencies=cycle,
+            )
+        )
 
     if len(review_tasks) != 1:
         findings.append(

@@ -33,6 +33,21 @@ def _digest(payload: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _finding_key(finding: object) -> str:
+    if not isinstance(finding, dict):
+        return _digest({"invalidFinding": finding})
+    return _digest(
+        {
+            "code": finding.get("code"),
+            "group": finding.get("group"),
+            "taskId": finding.get("taskId"),
+            "requirementId": finding.get("requirementId"),
+            "paths": sorted(finding.get("paths") or []),
+            "dependencyReferences": sorted(finding.get("dependencyReferences") or []),
+        }
+    )
+
+
 def checkpoint_path(workspace: Path | None = None) -> Path:
     return (workspace or Path.cwd()) / CHECKPOINT_NAME
 
@@ -150,6 +165,13 @@ def record_build(
         "checkpointStatus": "drafted",
         "updatedAt": _iso(now),
         "retainUntil": _iso(now + timedelta(hours=retention_hours)),
+        "retryContext": {
+            "objectiveDigest": objective_digest,
+            "manifestDigest": manifest_digest,
+            "correctionRound": correction_round,
+            "manifestTaskKeys": task_keys,
+            "lastFindingKeys": list(metrics.get("lastFindingKeys") or []),
+        },
         "metrics": {
             **metrics,
             "buildCount": int(metrics.get("buildCount", 0)) + 1,
@@ -186,12 +208,47 @@ def record_validation(
             if isinstance(finding, dict) and finding.get("code")
         }
     )
-    previous_codes = set(metrics.get("lastFindingCodes") or [])
-    introduced = sorted(set(current_codes) - previous_codes) if validation_runs > 1 else []
+    current_finding_keys = sorted(
+        _finding_key(finding)
+        for finding in report.get("findings", [])
+    )
+    previous_finding_keys = set(metrics.get("lastFindingKeys") or [])
+    introduced = (
+        sorted(set(current_finding_keys) - previous_finding_keys)
+        if validation_runs > 1
+        else []
+    )
+    previous_finding_count = metrics.get("lastFindingCount")
+    correction_reduced_findings = (
+        validation_runs == 1
+        or bool(report.get("ok"))
+        or (
+            isinstance(previous_finding_count, int)
+            and int(report.get("findingCount", 0)) < previous_finding_count
+        )
+    )
+    correction_accepted = not introduced and correction_reduced_findings
+    checkpoint_status = (
+        "validator_clean"
+        if report.get("ok")
+        else "correction_required"
+        if correction_accepted
+        else "correction_rejected"
+    )
+    retry_context = dict(current.get("retryContext") or {})
+    retry_context.update(
+        {
+            "correctionRound": int(current.get("correctionRound", 0)),
+            "lastFindingKeys": current_finding_keys,
+            "lastFindingCount": int(report.get("findingCount", 0)),
+            "checkpointStatus": checkpoint_status,
+        }
+    )
     current.update(
         {
-            "checkpointStatus": "validator_clean" if report.get("ok") else "correction_required",
+            "checkpointStatus": checkpoint_status,
             "findingCount": int(report.get("findingCount", 0)),
+            "retryContext": retry_context,
             "updatedAt": _iso(now),
             "metrics": {
                 **metrics,
@@ -202,6 +259,10 @@ def record_validation(
                     else metrics.get("firstPassValidatorSuccess")
                 ),
                 "lastFindingCodes": current_codes,
+                "lastFindingKeys": current_finding_keys,
+                "lastFindingCount": int(report.get("findingCount", 0)),
+                "lastCorrectionReducedFindings": correction_reduced_findings,
+                "lastCorrectionAccepted": correction_accepted,
                 "defectsIntroducedDuringCorrection": int(
                     metrics.get("defectsIntroducedDuringCorrection", 0)
                 ) + len(introduced),
@@ -277,6 +338,17 @@ def main() -> int:
             metrics = dict(checkpoint.get("metrics") or {})
             builds = max(1, int(metrics.get("buildCount", 0)))
             metrics["manifestReuseRate"] = int(metrics.get("manifestReuseCount", 0)) / builds
+            metrics["firstPassValidatorSuccessRate"] = (
+                1.0 if metrics.get("firstPassValidatorSuccess") else 0.0
+            )
+            metrics["terminalConvergenceRate"] = (
+                1.0 if metrics.get("terminalConverged") else 0.0
+            )
+            metrics["averageCorrectionRounds"] = (
+                float(metrics.get("terminalCorrectionRound", 0))
+                if metrics.get("terminalConverged")
+                else None
+            )
             attempts = int(metrics.get("workspaceResumeAttempts", 0))
             metrics["workspaceResumeSuccessRate"] = (
                 int(metrics.get("workspaceResumeSuccesses", 0)) / attempts

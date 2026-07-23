@@ -105,7 +105,9 @@ python3 scripts/validate_decomposition_json.py \
 ```
 
 8. If invalid, read the complete report once, edit the existing `manifest.json` in place, rebuild,
-   and revalidate. Never patch generated JSON and never regenerate the manifest.
+   and revalidate. Every correction must reduce the finding count without introducing a new finding
+   fingerprint; `correction_rejected` means use the remaining bounded round or stop. Never patch
+   generated JSON and never regenerate the manifest.
 9. Complete within one initial draft plus at most two correction rounds. If still invalid, block with
    the final report.
 10. Before retrying after timeout, run:
