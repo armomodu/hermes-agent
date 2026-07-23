@@ -815,6 +815,25 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("escapes mutationRoot", result.stderr)
 
+    def test_contract_required_rejects_docs_file_as_its_own_proof(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        docs_path = "apps/mission-control/docs/knowledge-plane/artifact-registry.md"
+        contract["primaryArtifactClass"] = "docs"
+        contract["mutationRoot"] = docs_path
+        contract["authorityRoot"] = docs_path
+        contract["proofRoot"] = docs_path
+        contract["writableFiles"] = [docs_path]
+        contract["proofFiles"] = [docs_path]
+        contract["readOnlyAnchors"] = []
+        contract["verification"] = {
+            "focusedTests": [],
+            "qualityGates": ["docs_scope_review"],
+        }
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("implementation_owns_proof", result.stderr)
+
     def test_contract_required_rejects_read_only_writable_overlap(self) -> None:
         payload = contract_required_payload()
         contract = payload["tasks"][0]["taskContract"]

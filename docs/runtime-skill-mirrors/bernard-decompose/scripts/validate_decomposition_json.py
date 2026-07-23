@@ -621,10 +621,17 @@ def collect_contract_required_findings(
         created_files = normalized_string_list(contract.get("createdFileGlobs"))
         mutation_root = str(contract.get("mutationRoot") or "").strip()
         proof_root = str(contract.get("proofRoot") or "").strip()
+        verification = contract.get("verification")
+        quality_gates = (
+            normalized_string_list(verification.get("qualityGates"))
+            if isinstance(verification, dict)
+            else []
+        )
         proof_only = (
             bool(proof_files)
             and mutation_root == proof_root
             and sorted(writable_files) == sorted(proof_files)
+            and "software_test" in quality_gates
         )
         if proof_only and sorted(writable_files) != sorted(proof_files):
             findings.append(
@@ -636,7 +643,7 @@ def collect_contract_required_findings(
                     paths=sorted(set(writable_files + proof_files)),
                 )
             )
-        if task_type == "execution" and not proof_only and proof_files and contract.get("primaryArtifactClass") != "docs":
+        if task_type == "execution" and not proof_only and proof_files:
             findings.append(
                 _graph_finding(
                     "implementation_owns_proof",
@@ -1104,6 +1111,12 @@ def main() -> int:
             proof_root = str(task_contract.get("proofRoot") or "").strip()
             writable_files = list(task_contract.get("writableFiles", []))
             proof_files = list(task_contract.get("proofFiles", []))
+            verification = task_contract.get("verification")
+            quality_gates = (
+                normalized_string_list(verification.get("qualityGates"))
+                if isinstance(verification, dict)
+                else []
+            )
             read_only_anchors = list(task_contract.get("readOnlyAnchors", []))
             output_artifacts = list(task_contract.get("outputArtifacts", []))
             provides = list(task_contract.get("provides", []))
@@ -1116,6 +1129,7 @@ def main() -> int:
                 mutation_root == proof_root
                 and sorted(writable_files) == sorted(proof_files)
                 and bool(proof_files)
+                and "software_test" in quality_gates
             )
             if proof_only:
                 if sorted(writable_files) != sorted(proof_files):
@@ -1143,7 +1157,6 @@ def main() -> int:
                 and task.get("taskType") == "execution"
                 and not proof_only
                 and proof_files
-                and task_contract.get("primaryArtifactClass") != "docs"
             ):
                 return fail(
                     f"normal implementation task must not declare proofFiles; split proof ownership for {task_id}: "

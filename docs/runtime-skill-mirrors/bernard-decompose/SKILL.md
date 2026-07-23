@@ -56,6 +56,8 @@ Hard boundaries:
 - One task owns one independently mutable production root.
 - Exact existing files are enumerated. A recursive writable glob is only for genuinely new files.
 - Normal implementation tasks do not write proof files and use `proofFiles=[]`.
+- Documentation slices are normal implementation tasks for this rule; a writable document cannot
+  prove itself.
 - A task with `proofFiles=[]` must not request `software_test`. Put executable tests and that gate on a
   separate proof-only task, and keep every `focusedTests` path inside its declared `proofFiles`.
 - New or changed proof belongs to a proof-only task whose mutation and proof root are the exact proof
