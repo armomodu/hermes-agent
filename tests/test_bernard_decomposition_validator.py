@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -15,6 +16,10 @@ VALIDATOR = (
 CONTRACT_BUILDER = (
     REPO_ROOT
     / "docs/runtime-skill-mirrors/bernard-decompose/scripts/build_contract_decomposition.py"
+)
+CHECKPOINT = (
+    REPO_ROOT
+    / "docs/runtime-skill-mirrors/bernard-decompose/scripts/decomposition_checkpoint.py"
 )
 SKILL = REPO_ROOT / "docs/runtime-skill-mirrors/bernard-decompose/SKILL.md"
 
@@ -254,6 +259,156 @@ def compact_manifest() -> dict:
     }
 
 
+def convergence_manifest() -> tuple[dict, dict]:
+    objective_id = str(uuid.uuid4())
+    implementation_file = "apps/mission-control/src/lib/knowledge-plane/contracts/release.ts"
+    proof_file = "apps/mission-control/src/lib/knowledge-plane/__tests__/release-proof.test.ts"
+    integration_file = "apps/mission-control/src/lib/knowledge-plane/__tests__/release-integration.test.ts"
+    authority_file = "apps/mission-control/src/lib/release/objective-release-service.ts"
+
+    def contract(
+        *,
+        mutation: str,
+        proof: str,
+        writable: list[str],
+        proof_files: list[str],
+        created: list[str],
+        provides: list[str],
+        consumes: list[str],
+        artifact_class: str | None = None,
+    ) -> dict:
+        value = {
+            "semanticHinge": f"Own the bounded change at {mutation}",
+            "workflowFamily": "release-contract",
+            "mutationRoot": mutation,
+            "authorityRoot": authority_file,
+            "proofRoot": proof,
+            "acceptanceHinge": f"The bounded change at {mutation} is authority-derived",
+            "writableFiles": writable,
+            "createdFileGlobs": created,
+            "proofFiles": proof_files,
+            "readOnlyAnchors": [authority_file],
+            "outputArtifacts": [],
+            "provides": provides,
+            "consumes": consumes,
+            "verification": {
+                "focusedTests": proof_files,
+                "qualityGates": ["software_test"] if proof_files else [],
+            },
+            "plan": {
+                "outcome": f"Produce the authority-derived bounded output at {mutation}",
+                "inspect": "Inspect the declared release authority.",
+                "derive": "Derive the exact missing bounded delta.",
+                "apply": "Apply only the declared mutation.",
+                "verify": "Run the declared focused proof.",
+                "operation": "modify",
+                "symbols": ["releaseContract"],
+                "invariant": "No sibling mutation root changes.",
+                "completionChecks": ["The declared bounded proof passes"],
+            },
+        }
+        if artifact_class:
+            value["primaryArtifactClass"] = artifact_class
+        return value
+
+    manifest = {
+        "kind": "contract-decomposition-manifest.v1",
+        "objectiveId": objective_id,
+        "statusNote": "Release contract decomposition is ready for review",
+        "tasks": [
+            {
+                "key": "release-contract",
+                "requirements": [f"ownership:{implementation_file}"],
+                "title": "Author bounded release contract",
+                "assignee": "William",
+                "taskType": "execution",
+                "priority": "P1",
+                "nextAction": "Implement the bounded contract",
+                "dependsOn": [],
+                "contract": contract(
+                    mutation=implementation_file,
+                    proof=proof_file,
+                    writable=[implementation_file],
+                    proof_files=[],
+                    created=[],
+                    provides=["release-contract-v1"],
+                    consumes=[],
+                ),
+            },
+            {
+                "key": "release-proof",
+                "requirements": ["proof:0"],
+                "title": "Prove bounded release contract",
+                "assignee": "William",
+                "taskType": "execution",
+                "priority": "P1",
+                "nextAction": "Create the focused proof",
+                "dependsOn": ["release-contract"],
+                "contract": contract(
+                    mutation=proof_file,
+                    proof=proof_file,
+                    writable=[proof_file],
+                    proof_files=[proof_file],
+                    created=[proof_file],
+                    provides=["release-proof-v1"],
+                    consumes=["release-contract-v1"],
+                ),
+            },
+            {
+                "key": "integration-proof",
+                "requirements": [],
+                "title": "Run final integration proof",
+                "assignee": "William",
+                "taskType": "execution",
+                "priority": "P1",
+                "nextAction": "Run the complete proof",
+                "dependsOn": ["release-contract", "release-proof"],
+                "contract": contract(
+                    mutation=integration_file,
+                    proof=integration_file,
+                    writable=[integration_file],
+                    proof_files=[integration_file],
+                    created=[integration_file],
+                    provides=["release-integration-v1"],
+                    consumes=["release-contract-v1", "release-proof-v1"],
+                    artifact_class="integration_proof",
+                ),
+            },
+            {
+                "key": "gate-review",
+                "requirements": [],
+                "title": "Review the complete release graph",
+                "assignee": "Bernard",
+                "taskType": "review",
+                "reviewMode": "gate_review",
+                "priority": "P1",
+                "nextAction": "Review the integrated graph",
+                "dependsOn": ["release-contract", "release-proof", "integration-proof"],
+                "contract": contract(
+                    mutation=integration_file,
+                    proof=integration_file,
+                    writable=[],
+                    proof_files=[integration_file],
+                    created=[],
+                    provides=[],
+                    consumes=[],
+                    artifact_class="review_gate",
+                ),
+            },
+        ],
+    }
+    objective = {
+        "id": objective_id,
+        "decompositionContract": {
+            "taskContractRequired": True,
+            "maxTaskCount": 8,
+            "requiredOwnershipPaths": [implementation_file],
+            "proofExpected": ["The bounded release proof passes"],
+        },
+    }
+    return manifest, objective
+
+
 class BernardDecompositionValidatorTest(unittest.TestCase):
     def run_validator(self, payload: dict, *args: str) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -275,8 +430,10 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
     def test_operational_skill_is_concise_and_manifest_first(self) -> None:
         skill = SKILL.read_text(encoding="utf-8")
         self.assertLess(len(skill.splitlines()), 250)
-        self.assertIn("build_contract_decomposition.py manifest.json decomposition.json", skill)
-        self.assertIn("Do not read validator source", skill)
+        self.assertIn("Canonical Manifest Workflow", skill)
+        self.assertIn("decomposition_checkpoint.py resume", skill)
+        self.assertIn("Never change a key during correction", skill)
+        self.assertIn("read the complete report once", skill)
         self.assertIn("Every listed path must have exactly one explicit writable owner", skill)
         self.assertIn("One final `integration_proof`", skill)
 
@@ -334,6 +491,166 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("unknown dependsOn keys", result.stderr)
 
+    def test_manifest_checkpoint_survives_retry_and_counts_only_real_corrections(self) -> None:
+        manifest = compact_manifest()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            source = workspace / "manifest.json"
+            output = workspace / "decomposition.json"
+            objective = workspace / "objective.json"
+            source.write_text(json.dumps(manifest), encoding="utf-8")
+            objective.write_text(
+                json.dumps({"id": manifest["objectiveId"], "decompositionContract": {}}),
+                encoding="utf-8",
+            )
+            command = [
+                "python3",
+                str(CONTRACT_BUILDER),
+                str(source),
+                str(output),
+                "--objective",
+                str(objective),
+            ]
+            first = subprocess.run(command, cwd=workspace, capture_output=True, text=True)
+            retry = subprocess.run(command, cwd=workspace, capture_output=True, text=True)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(retry.returncode, 0, retry.stderr)
+            self.assertEqual(json.loads(first.stdout)["correctionRound"], 0)
+            self.assertEqual(json.loads(retry.stdout)["correctionRound"], 0)
+
+            manifest["statusNote"] = "Corrected bounded artifact registry graph"
+            source.write_text(json.dumps(manifest), encoding="utf-8")
+            corrected = subprocess.run(command, cwd=workspace, capture_output=True, text=True)
+            self.assertEqual(corrected.returncode, 0, corrected.stderr)
+            self.assertEqual(json.loads(corrected.stdout)["correctionRound"], 1)
+            status = subprocess.run(
+                ["python3", str(CHECKPOINT), "status", "--workspace", str(workspace)],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(status.returncode, 0, status.stderr)
+            checkpoint = json.loads(status.stdout)
+            self.assertEqual(checkpoint["correctionRound"], 1)
+            self.assertEqual(checkpoint["checkpointStatus"], "drafted")
+
+    def test_autonomous_convergence_reuses_manifest_across_correction_and_retry(self) -> None:
+        manifest, objective = convergence_manifest()
+        manifest["tasks"][0]["contract"]["authorityRoot"] = "apps/mission-control"
+        manifest["tasks"][2]["dependsOn"] = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            manifest_path = workspace / "manifest.json"
+            objective_path = workspace / "objective.json"
+            decomposition_path = workspace / "decomposition.json"
+            report_path = workspace / "decomposition-validator-report.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            build = [
+                "python3",
+                str(CONTRACT_BUILDER),
+                str(manifest_path),
+                str(decomposition_path),
+                "--objective",
+                str(objective_path),
+            ]
+            validate = [
+                "python3",
+                str(VALIDATOR),
+                "--contract-required",
+                str(decomposition_path),
+                "8",
+                "--objective",
+                str(objective_path),
+                "--manifest",
+                str(manifest_path),
+                "--report",
+                str(report_path),
+            ]
+
+            first_build = subprocess.run(build, cwd=workspace, capture_output=True, text=True)
+            first_validate = subprocess.run(validate, cwd=workspace, capture_output=True, text=True)
+            self.assertEqual(first_build.returncode, 0, first_build.stderr)
+            self.assertNotEqual(first_validate.returncode, 0)
+            first_payload = json.loads(decomposition_path.read_text())
+            first_ids = [task["id"] for task in first_payload["tasks"]]
+            first_report = json.loads(report_path.read_text())
+            first_codes = {item["code"] for item in first_report["findings"]}
+            self.assertIn("authority_root_too_broad", first_codes)
+            self.assertIn("integration_proof_dependencies_missing", first_codes)
+
+            manifest["tasks"][0]["contract"]["authorityRoot"] = (
+                "apps/mission-control/src/lib/release/objective-release-service.ts"
+            )
+            manifest["tasks"][2]["dependsOn"] = ["release-contract", "release-proof"]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            corrected_build = subprocess.run(build, cwd=workspace, capture_output=True, text=True)
+            corrected_validate = subprocess.run(validate, cwd=workspace, capture_output=True, text=True)
+            self.assertEqual(corrected_build.returncode, 0, corrected_build.stderr)
+            self.assertEqual(corrected_validate.returncode, 0, corrected_validate.stderr)
+            corrected_output = decomposition_path.read_text()
+            corrected_payload = json.loads(corrected_output)
+            self.assertEqual([task["id"] for task in corrected_payload["tasks"]], first_ids)
+            self.assertEqual(json.loads(corrected_build.stdout)["correctionRound"], 1)
+            self.assertEqual(json.loads(report_path.read_text())["findingCount"], 0)
+
+            resumed = subprocess.run(
+                ["python3", str(CHECKPOINT), "resume"],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(resumed.returncode, 0, resumed.stderr)
+            retry_build = subprocess.run(build, cwd=workspace, capture_output=True, text=True)
+            retry_validate = subprocess.run(validate, cwd=workspace, capture_output=True, text=True)
+            self.assertEqual(retry_build.returncode, 0, retry_build.stderr)
+            self.assertEqual(retry_validate.returncode, 0, retry_validate.stderr)
+            self.assertEqual(decomposition_path.read_text(), corrected_output)
+            self.assertEqual(json.loads(retry_build.stdout)["correctionRound"], 1)
+
+            accepted = subprocess.run(
+                ["python3", str(CHECKPOINT), "mark", "accepted"],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "BERNARD_DECOMPOSITION_ARCHIVE_ROOT": str(workspace / "archive"),
+                },
+            )
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            accepted_checkpoint = json.loads(accepted.stdout)
+            self.assertEqual(accepted_checkpoint["checkpointStatus"], "accepted")
+            archive = Path(accepted_checkpoint["archivePath"])
+            self.assertEqual(
+                json.loads((archive / "canonical-manifest.json").read_text()),
+                json.loads(manifest_path.read_text()),
+            )
+            self.assertEqual(
+                json.loads((archive / "accepted-decomposition.json").read_text()),
+                json.loads(decomposition_path.read_text()),
+            )
+            self.assertEqual(
+                json.loads((archive / "validator-report.json").read_text()),
+                json.loads(report_path.read_text()),
+            )
+            self.assertEqual(
+                json.loads((archive / "checkpoint.json").read_text())["checkpointStatus"],
+                "accepted",
+            )
+            metrics = subprocess.run(
+                ["python3", str(CHECKPOINT), "metrics"],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(metrics.returncode, 0, metrics.stderr)
+            metric_payload = json.loads(metrics.stdout)
+            self.assertFalse(metric_payload["firstPassValidatorSuccess"])
+            self.assertEqual(metric_payload["terminalCorrectionRound"], 1)
+            self.assertEqual(metric_payload["workspaceResumeSuccessRate"], 1.0)
+            self.assertEqual(metric_payload["fullRegenerationCount"], 0)
+
     def test_repair_without_plan_fails(self) -> None:
         payload = repair_payload()
         payload["taskContract"].pop("executionPlan")
@@ -372,7 +689,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         payload["taskContract"]["createdFileGlobs"] = ["apps/mission-control/docs/proof.md"]
         result = self.run_validator(payload, "--repair")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("proof scope is empty, non-executable", result.stderr)
+        self.assertIn("software_test proof scope is not executable", result.stderr)
 
     def test_repair_with_markdown_evidence_without_software_test_passes(self) -> None:
         payload = repair_payload()
@@ -445,7 +762,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         }
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("taskContract is required", result.stderr)
+        self.assertIn("task_contract_missing", result.stderr)
 
     def test_contract_required_enforces_strict_execution_plan_references(self) -> None:
         execution_id = str(uuid.uuid4())
@@ -563,7 +880,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         contract["proofFiles"] = [contract["proofRoot"]]
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("split proof ownership", result.stderr)
+        self.assertIn("implementation_owns_proof", result.stderr)
 
     def test_contract_required_rejects_software_test_without_proof_files(self) -> None:
         payload = contract_required_payload()
@@ -575,7 +892,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         }
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("proof scope is empty", result.stderr)
+        self.assertIn("software_test_proof_missing", result.stderr)
 
     def test_contract_required_rejects_focused_test_outside_proof_files(self) -> None:
         payload = contract_required_payload()
@@ -585,7 +902,39 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         ]
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("does not authorize every focused test", result.stderr)
+        self.assertIn("focused_test_outside_proof_scope", result.stderr)
+
+    def test_contract_required_reports_all_task_graph_and_coverage_findings_together(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][0]["taskContract"]["authorityRoot"] = "apps/mission-control"
+        payload["tasks"][0]["taskContract"]["proofRoot"] = "apps/mission-control/src/lib/knowledge-plane/__tests__"
+        payload["tasks"][1]["dependsOn"] = ["missing-provider"]
+        payload["tasks"][2]["dependsOn"] = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "decomposition.json"
+            report_path = Path(temp_dir) / "report.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(VALIDATOR),
+                    "--contract-required",
+                    str(path),
+                    "--report",
+                    str(report_path),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            report = json.loads(report_path.read_text())
+            codes = {finding["code"] for finding in report["findings"]}
+            self.assertIn("authority_root_too_broad", codes)
+            self.assertIn("proof_root_not_exact", codes)
+            self.assertIn("dependency_not_found", codes)
+            self.assertIn("integration_proof_dependencies_missing", codes)
+            self.assertGreaterEqual(report["findingCount"], 4)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 ---
 name: bernard-decompose
-version: 3.0.0
+version: 4.0.0
 author: Dolores
 description: |
   Produce bounded Mission Control decomposition and task-repair contracts.
@@ -21,17 +21,19 @@ Return one locally validated structured result:
 
 Do not execute implementation work, approve the objective, activate it, or release William.
 
-## Sources Of Truth
+## Authority-First Method
 
 1. Read the live Mission Control objective or repair card.
-2. Follow its `decompositionContract`, approved slices, allowed paths, required ownership paths,
-   maximum task count, and completion marker literally.
-3. Use this skill for shaping.
-4. Use the existing Python validator for local mechanical feedback.
-5. Treat Mission Control's compiler/linter response as final authority.
+2. Inventory objective requirements, required ownership paths, and live authority roots.
+3. Assign each requirement exactly once before designing task prose.
+4. Slice by one mutation root, one authority root, one proof root, and one acceptance hinge.
+5. Add explicit evidence providers, consumers, and dependency edges.
+6. Put the final integration proof and gate review last.
+7. Use the existing Python validator for mechanical feedback.
+8. Treat Mission Control's compiler/linter response as final authority.
 
-Do not read validator source to infer policy. Do not use prior graphs, memory, or nearby files as
-authority when the live objective provides a contract.
+Do not encode objective-specific policy in this skill. Do not use prior graphs, memory, or nearby
+files as authority when the live objective provides a contract.
 
 ## Contract-Required Decomposition
 
@@ -71,36 +73,69 @@ Hard boundaries:
 Start from `requiredOwnershipPaths`. Every listed path must have exactly one explicit writable owner.
 Do not hide existing ownership behind a parent `/**` glob.
 
-## Manifest-First Workflow
+## Canonical Manifest Workflow
 
-For every non-1A.1 contract-required graph with eight or more tasks:
+Use this workflow for every contract-required graph:
 
 1. Write `manifest.json` with `kind="contract-decomposition-manifest.v1"`.
-2. Give every slice a short unique `key`.
-3. Express dependencies by key.
-4. Put all task-specific contract truth in each `contract` object, including a compact `plan`.
-5. Expand once:
+2. Give every slice a stable semantic `key`. Never change a key during correction.
+3. Assign objective requirements with stable IDs:
+   - `ownership:<exact required path>`;
+   - `proof:<zero-based proofExpected index>`;
+   - `slice:<zero-based approvedSlices index>`.
+4. Express dependencies by key.
+5. Put all task-specific contract truth in each `contract`, including a compact `plan`.
+6. Expand and checkpoint:
 
 ```bash
-python3 scripts/build_contract_decomposition.py manifest.json decomposition.json
+python3 scripts/build_contract_decomposition.py \
+  manifest.json decomposition.json --objective objective.json
 ```
 
-6. Validate:
+7. Validate the whole graph and write one batch report:
 
 ```bash
-python3 scripts/validate_decomposition_json.py --contract-required decomposition.json <maxTaskCount>
+python3 scripts/validate_decomposition_json.py \
+  --contract-required decomposition.json <maxTaskCount> \
+  --objective objective.json \
+  --manifest manifest.json \
+  --report decomposition-validator-report.json
 ```
 
-7. If invalid, edit `manifest.json`, rebuild, and revalidate. Never patch generated JSON.
-8. Submit the exact validated `decomposition.json` once to the live `/decompose` URL with
+8. If invalid, read the complete report once, edit the existing `manifest.json` in place, rebuild,
+   and revalidate. Never patch generated JSON and never regenerate the manifest.
+9. Complete within one initial draft plus at most two correction rounds. If still invalid, block with
+   the final report.
+10. Before retrying after timeout, run:
+
+```bash
+python3 scripts/decomposition_checkpoint.py resume
+```
+
+Resume the recorded manifest and correction round. A missing checkpoint is a continuity blocker; do
+not reconstruct from memory.
+11. Submit the exact validated `decomposition.json` once to the live `/decompose` URL with
    `Authorization: Bearer $CRON_SERVICE_TOKEN`.
-9. Read the response. Stop on any rejection; report the exact finding rather than improvising a
+12. On HTTP success, mark the checkpoint accepted:
+
+```bash
+python3 scripts/decomposition_checkpoint.py mark accepted
+```
+
+This archives the canonical manifest, compiled decomposition, validator report, checkpoint, and
+metrics outside the disposable task workspace.
+
+13. Report convergence metrics:
+
+```bash
+python3 scripts/decomposition_checkpoint.py metrics
+```
+
+14. Read the response. Stop on any rejection; report the exact finding rather than improvising a
    legacy or smaller graph.
 
-The expander creates deterministic UUIDs and repetitive plan structure only. It is not a second
-compiler or validator.
-
-For a smaller contract-required graph, the same manifest path is preferred.
+The expander creates deterministic UUIDs and plan structure only. The batch validator remains the
+single Bernard-side mechanical authority.
 
 ## Slice Matrix Checklist
 
@@ -118,17 +153,6 @@ Before expansion, verify:
 - final integration proof consumes all required outputs;
 - gate review is last and read-only;
 - task count is within the live cap.
-
-## 1A.1 Deterministic Exception
-
-For objective `4009e581-7231-4930-9a0d-b2b56b281d9e` only:
-
-```bash
-python3 scripts/build_1a1_decomposition.py objective.json decomposition.json
-python3 scripts/validate_decomposition_json.py decomposition.json 35
-```
-
-Submit the exact output. Do not freehand or adapt this helper for any other objective.
 
 ## Task Repair
 
@@ -151,7 +175,7 @@ Never complete a marked repair card with prose, null output, or an unvalidated c
 ## Submission Safety
 
 - Write files only in the task workspace.
-- Fail closed if `MC_API_URL), the decompose URL, or `CRON_SERVICE_TOKEN` is missing.
+- Fail closed if `MC_API_URL`, the decompose URL, or `CRON_SERVICE_TOKEN` is missing.
 - Never submit twice after a timeout without reading objective state.
 - Never create, approve, activate, or release execution tasks directly.
 - If local validation cannot pass, block with the exact validator output.
