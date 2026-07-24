@@ -816,6 +816,45 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("amendment manifest requires --objective", result.stderr)
 
+    def test_amendment_baseline_rejects_stale_completed_contract(self) -> None:
+        manifest, objective = convergence_manifest()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            manifest_path = workspace / "manifest.json"
+            objective_path = workspace / "objective.json"
+            decomposition_path = workspace / "decomposition.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            build = subprocess.run(
+                [
+                    "python3",
+                    str(CONTRACT_BUILDER),
+                    str(manifest_path),
+                    str(decomposition_path),
+                    "--objective",
+                    str(objective_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(build.returncode, 0, build.stderr)
+            baseline = json.loads(decomposition_path.read_text(encoding="utf-8"))
+        baseline["tasks"][0]["status"] = "done"
+        manifest["tasks"][0]["contract"]["acceptanceHinge"] = "Changed after acceptance"
+
+        result, report = self.run_contract_validation(
+            manifest,
+            objective,
+            amend_baseline=baseline,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "amendment_completed_contract_changed",
+            {finding["code"] for finding in report["findings"]},
+        )
+
     def test_manifest_rejects_duplicate_persisted_task_ids(self) -> None:
         manifest = compact_manifest()
         persisted_id = str(uuid.uuid4())

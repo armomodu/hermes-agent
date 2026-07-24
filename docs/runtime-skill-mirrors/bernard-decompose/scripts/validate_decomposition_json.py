@@ -149,6 +149,36 @@ def normalized_string_list(value: object) -> list[str]:
     return cleaned_values
 
 
+def contract_without_additive_evidence(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    contract = {key: item for key, item in value.items() if key != "consumes"}
+    execution_plan = contract.get("executionPlan")
+    if not isinstance(execution_plan, dict):
+        return contract
+    plan = dict(execution_plan)
+    steps = plan.get("steps")
+    if isinstance(steps, list):
+        plan["steps"] = [
+            {
+                **step,
+                "references": [
+                    reference
+                    for reference in step.get("references", [])
+                    if not (
+                        isinstance(reference, str)
+                        and reference.startswith("consumedToken:")
+                    )
+                ],
+            }
+            if isinstance(step, dict)
+            else step
+            for step in steps
+        ]
+    contract["executionPlan"] = plan
+    return contract
+
+
 def fail(message: str) -> int:
     print(f"INVALID: {message}", file=sys.stderr)
     return 1
@@ -1220,6 +1250,48 @@ def emit_contract_required_report(
     grandfathered_findings: list[dict] = []
     if isinstance(amend_baseline, dict):
         baseline_tasks = amend_baseline.get("tasks")
+        baseline_by_id = {
+            str(task.get("id") or "").strip(): task
+            for task in baseline_tasks
+            if isinstance(task, dict) and str(task.get("id") or "").strip()
+        } if isinstance(baseline_tasks, list) else {}
+        proposed_tasks = payload.get("tasks") if isinstance(payload, dict) else None
+        if isinstance(proposed_tasks, list):
+            for proposed in proposed_tasks:
+                if not isinstance(proposed, dict):
+                    continue
+                task_id = str(proposed.get("id") or "").strip()
+                baseline_task = baseline_by_id.get(task_id)
+                if not baseline_task:
+                    continue
+                baseline_contract = baseline_task.get("taskContract")
+                proposed_contract = proposed.get("taskContract")
+                if baseline_task.get("status") == "done":
+                    contracts_match = baseline_contract == proposed_contract
+                    finding_code = "amendment_completed_contract_changed"
+                    message = (
+                        "completed amendment child must preserve its accepted live "
+                        f"taskContract exactly: {task_id}"
+                    )
+                else:
+                    contracts_match = (
+                        contract_without_additive_evidence(baseline_contract)
+                        == contract_without_additive_evidence(proposed_contract)
+                    )
+                    finding_code = "amendment_incomplete_contract_changed"
+                    message = (
+                        "incomplete amendment child may change only consumed evidence "
+                        f"and derived consumed-token references: {task_id}"
+                    )
+                if not contracts_match:
+                    findings.append(
+                        _graph_finding(
+                            finding_code,
+                            "task",
+                            message,
+                            task_id=task_id,
+                        )
+                    )
         baseline_task_ids = {
             str(task.get("id") or "").strip()
             for task in baseline_tasks
