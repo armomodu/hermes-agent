@@ -129,10 +129,16 @@ def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
         }
         if "primaryArtifactClass" in contract_input:
             contract["primaryArtifactClass"] = require_text(contract_input["primaryArtifactClass"], "contract.primaryArtifactClass", key)
-        plan = contract_input.get("plan")
-        if not isinstance(plan, dict):
-            raise ValueError(f"contract.plan is required for {key}")
-        contract["executionPlan"] = build_execution_plan(contract, plan, key)
+        execution_plan = contract_input.get("executionPlan")
+        if execution_plan is not None:
+            if not isinstance(execution_plan, dict):
+                raise ValueError(f"contract.executionPlan must be an object for {key}")
+            contract["executionPlan"] = execution_plan
+        else:
+            plan = contract_input.get("plan")
+            if not isinstance(plan, dict):
+                raise ValueError(f"contract.plan is required for {key}")
+            contract["executionPlan"] = build_execution_plan(contract, plan, key)
         dependency_keys = require_string_list(item.get("dependsOn", []), "dependsOn", key)
         unknown = [dependency for dependency in dependency_keys if dependency not in ids]
         if unknown:

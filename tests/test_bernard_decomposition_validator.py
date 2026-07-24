@@ -709,6 +709,33 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 plan["steps"][1]["references"],
             )
 
+    def test_compact_manifest_preserves_explicit_execution_plan(self) -> None:
+        manifest = compact_manifest()
+        explicit_plan = copy.deepcopy(task_contract("apps/mission-control/src/lib/storage/types.ts")["executionPlan"])
+        explicit_plan["outcome"] = "Preserve the authority-derived amendment plan exactly"
+        manifest["tasks"][0]["contract"].pop("plan")
+        manifest["tasks"][0]["contract"]["executionPlan"] = explicit_plan
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "manifest.json"
+            output = Path(temp_dir) / "decomposition.json"
+            source.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                ["python3", str(CONTRACT_BUILDER), str(source), str(output)],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["tasks"][0]["taskContract"]["executionPlan"],
+                explicit_plan,
+            )
+
     def test_manifest_amendment_preserves_authoritative_persisted_task_ids(self) -> None:
         manifest = compact_manifest()
         persisted_id = str(uuid.uuid4())
