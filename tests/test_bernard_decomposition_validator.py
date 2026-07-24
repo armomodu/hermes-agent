@@ -584,8 +584,11 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
     def test_valid_authority_impact_is_accepted_with_existing_exact_owner(self) -> None:
         manifest, objective = convergence_manifest()
         implementation_path = objective["decompositionContract"]["requiredOwnershipPaths"][0]
+        authority_path = "apps/mission-control/src/lib/storage/storage-adapter-interface.ts"
+        manifest["tasks"][0]["contract"]["authorityRoot"] = authority_path
+        manifest["tasks"][0]["contract"]["readOnlyAnchors"] = [authority_path]
         manifest["authorityImpact"] = [{
-            "authorityPath": "apps/mission-control/src/lib/storage/storage-adapter-interface.ts",
+            "authorityPath": authority_path,
             "changeKind": "shared_interface",
             "symbols": ["StorageAdapter"],
             "candidates": [{"path": implementation_path, "matchedSymbols": ["StorageAdapter"]}],
@@ -596,6 +599,29 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(report["findingCount"], 0)
+
+    def test_shared_interface_composition_owner_must_use_originating_authority(self) -> None:
+        manifest, objective = convergence_manifest()
+        implementation_path = objective["decompositionContract"]["requiredOwnershipPaths"][0]
+        authority_path = "apps/mission-control/src/lib/storage/storage-adapter-interface.ts"
+        manifest["authorityImpact"] = [{
+            "authorityPath": authority_path,
+            "changeKind": "shared_interface",
+            "symbols": ["StorageAdapter"],
+            "candidates": [{"path": implementation_path, "matchedSymbols": ["StorageAdapter"]}],
+            "confirmedRoots": [{"path": implementation_path, "role": "composition"}],
+        }]
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertNotEqual(result.returncode, 0)
+        finding = next(
+            item
+            for item in report["findings"]
+            if item["code"] == "authority_impact_owner_authority_invalid"
+        )
+        self.assertTrue(finding["taskId"])
+        self.assertEqual(finding["paths"], [authority_path, implementation_path])
 
     def test_contract_validator_accepts_authoritative_ids_for_graph_amendment(self) -> None:
         manifest, objective = convergence_manifest()

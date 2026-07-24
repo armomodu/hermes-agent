@@ -59,6 +59,9 @@ python3 scripts/collect_authority_impact.py \
 
 For a shared interface, at least one confirmed composition or export root is mandatory. Never infer
 impact from prose alone or omit a confirmed root because another task owns the interface definition.
+Each composition or export owner must use the changed interface path as its primary `authorityRoot`.
+When that owner changes executable source, require `software_build` so type-level composition is proved
+before review.
 
 ## Contract-Required Decomposition
 

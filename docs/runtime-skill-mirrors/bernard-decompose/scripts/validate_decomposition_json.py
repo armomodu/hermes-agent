@@ -1057,6 +1057,35 @@ def collect_contract_required_findings(
                                         paths=[path],
                                     )
                                 )
+                            if (
+                                change_kind == "shared_interface"
+                                and role in {"composition", "export"}
+                                and authority_path
+                            ):
+                                owners = [
+                                    (task, task_id)
+                                    for task, task_id in zip(valid_tasks, task_ids)
+                                    if isinstance(task.get("taskContract"), dict)
+                                    and path in normalized_string_list(
+                                        task["taskContract"].get("writableFiles")
+                                    )
+                                ]
+                                if len(owners) == 1:
+                                    owner_task, owner_task_id = owners[0]
+                                    owner_contract = owner_task["taskContract"]
+                                    if owner_contract.get("authorityRoot") != authority_path:
+                                        findings.append(
+                                            _graph_finding(
+                                                "authority_impact_owner_authority_invalid",
+                                                "task",
+                                                (
+                                                    "shared-interface composition/export owner must "
+                                                    f"use the originating authority path: {authority_path}"
+                                                ),
+                                                task_id=owner_task_id or None,
+                                                paths=[authority_path, path],
+                                            )
+                                        )
                         if change_kind == "shared_interface" and not (
                             {"composition", "export"} & confirmed_roles
                         ):
