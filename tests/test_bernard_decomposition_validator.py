@@ -1149,6 +1149,29 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unresolved reference", result.stderr)
 
+    def test_repair_allows_exact_preserve_only_sibling_authority(self) -> None:
+        payload = repair_payload()
+        payload["taskContract"]["authorityRoot"] = (
+            "apps/mission-control/src/lib/storage/storage-adapter-interface.ts"
+        )
+        payload["taskContract"]["readOnlyAnchors"] = [
+            "apps/mission-control/src/lib/storage/file-storage-adapter.ts"
+        ]
+        result = self.run_validator(payload, "--repair")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_repair_rejects_broad_preserve_only_sibling_authority(self) -> None:
+        payload = repair_payload()
+        payload["taskContract"]["authorityRoot"] = (
+            "apps/mission-control/src/lib/storage/storage-adapter-interface.ts"
+        )
+        payload["taskContract"]["readOnlyAnchors"] = [
+            "apps/mission-control/src/lib/storage/**"
+        ]
+        result = self.run_validator(payload, "--repair")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("only exact preserve-only files", result.stderr)
+
     def test_repair_with_created_path_outside_contract_roots_fails(self) -> None:
         payload = repair_payload()
         payload["taskContract"]["createdFileGlobs"] = ["apps/mission-control/src/app/api/unrelated.ts"]
@@ -1361,6 +1384,18 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("readOnlyAnchors overlaps writable scope", result.stderr)
+
+    def test_contract_required_allows_exact_preserve_only_sibling_authority(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        contract["authorityRoot"] = (
+            "apps/mission-control/src/lib/storage/storage-adapter-interface.ts"
+        )
+        contract["readOnlyAnchors"] = [
+            "apps/mission-control/src/lib/storage/file-storage-adapter.ts"
+        ]
+        result = self.run_validator(payload, "--contract-required")
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_contract_required_rejects_missing_integration_proof(self) -> None:
         payload = contract_required_payload()

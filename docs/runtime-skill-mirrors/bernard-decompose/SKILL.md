@@ -92,7 +92,9 @@ Hard boundaries:
   Do not invent aliases such as `mission_control_build`; the validator rejects unknown gate names.
 - New or changed proof belongs to a proof-only task whose mutation and proof root are the exact proof
   file.
-- `readOnlyAnchors` never overlap writable or created scope.
+- `readOnlyAnchors` never overlap writable or created scope. An exact preserve-only file may be a
+  sibling of the primary `authorityRoot` when it is necessary to retain canonical implementation
+  semantics; directory and glob expansion outside the primary authority root remain forbidden.
 - Schema and migration ownership are separate tasks.
 - Shared interface, file adapter, hosted adapter, hybrid adapter, and export surfaces are separate
   owners when the objective requires them.

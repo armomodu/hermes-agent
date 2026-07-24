@@ -396,7 +396,6 @@ def collect_task_contract_local_findings(
     for field, root_field in (
         ("writableFiles", "mutationRoot"),
         ("proofFiles", "proofRoot"),
-        ("readOnlyAnchors", "authorityRoot"),
     ):
         root = roots[root_field]
         if not root:
@@ -407,6 +406,17 @@ def collect_task_contract_local_findings(
                     f"{field}_outside_{root_field}",
                     f"taskContract.{field} escapes {root_field} for {task_id}: {item} not under {root}",
                     [item, root],
+                )
+    if strict_graph or strict_plan:
+        for anchor in read_only_anchors:
+            if authority_root and _path_within_root(anchor, authority_root):
+                continue
+            if not _is_exact_file_path(anchor):
+                add(
+                    "read_only_anchor_broad_sibling_scope",
+                    f"taskContract.readOnlyAnchors may use only exact preserve-only files outside "
+                    f"authorityRoot for {task_id}: {anchor}",
+                    [anchor, authority_root],
                 )
     for item in created_file_globs:
         exact_proof_creation = (
