@@ -297,7 +297,11 @@ def convergence_manifest() -> tuple[dict, dict]:
             "consumes": consumes,
             "verification": {
                 "focusedTests": proof_files,
-                "qualityGates": ["software_test"] if proof_files else [],
+                "qualityGates": (
+                    ["software_test", "software_build"]
+                    if artifact_class == "integration_proof"
+                    else ["software_test"] if proof_files else []
+                ),
             },
             "plan": {
                 "outcome": f"Produce the authority-derived bounded output at {mutation}",
@@ -626,6 +630,55 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         )
         self.assertTrue(finding["taskId"])
         self.assertEqual(finding["paths"], [authority_path, implementation_path])
+
+    def test_shared_interface_build_waits_for_confirmed_composition_owner(self) -> None:
+        manifest, objective = convergence_manifest()
+        authority_path = objective["decompositionContract"]["requiredOwnershipPaths"][0]
+        composition_path = manifest["tasks"][1]["contract"]["mutationRoot"]
+        objective["decompositionContract"]["requiredOwnershipPaths"].append(composition_path)
+        manifest["tasks"][1]["requirements"].append(f"ownership:{composition_path}")
+        manifest["tasks"][1]["contract"]["authorityRoot"] = authority_path
+        manifest["tasks"][1]["contract"]["readOnlyAnchors"] = [authority_path]
+        manifest["tasks"][0]["contract"]["verification"]["qualityGates"] = ["software_build"]
+        manifest["authorityImpact"] = [{
+            "authorityPath": authority_path,
+            "changeKind": "shared_interface",
+            "symbols": ["releaseContract"],
+            "candidates": [{"path": composition_path, "matchedSymbols": ["releaseContract"]}],
+            "confirmedRoots": [{"path": composition_path, "role": "composition"}],
+        }]
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertNotEqual(result.returncode, 0)
+        finding = next(
+            item
+            for item in report["findings"]
+            if item["code"] == "shared_interface_build_gate_premature"
+        )
+        self.assertTrue(finding["taskId"])
+        self.assertEqual(len(finding["dependencyReferences"]), 1)
+
+    def test_shared_interface_final_integration_proof_owns_build(self) -> None:
+        manifest, objective = convergence_manifest()
+        authority_path = objective["decompositionContract"]["requiredOwnershipPaths"][0]
+        composition_path = manifest["tasks"][1]["contract"]["mutationRoot"]
+        objective["decompositionContract"]["requiredOwnershipPaths"].append(composition_path)
+        manifest["tasks"][1]["requirements"].append(f"ownership:{composition_path}")
+        manifest["tasks"][1]["contract"]["authorityRoot"] = authority_path
+        manifest["tasks"][1]["contract"]["readOnlyAnchors"] = [authority_path]
+        manifest["authorityImpact"] = [{
+            "authorityPath": authority_path,
+            "changeKind": "shared_interface",
+            "symbols": ["releaseContract"],
+            "candidates": [{"path": composition_path, "matchedSymbols": ["releaseContract"]}],
+            "confirmedRoots": [{"path": composition_path, "role": "composition"}],
+        }]
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["findingCount"], 0)
 
     def test_contract_validator_accepts_authoritative_ids_for_graph_amendment(self) -> None:
         manifest, objective = convergence_manifest()

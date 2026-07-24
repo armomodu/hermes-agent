@@ -1077,6 +1077,7 @@ def collect_contract_required_findings(
                             )
                             continue
                         confirmed_roles: set[str] = set()
+                        composition_owner_ids: set[str] = set()
                         for root_index, root in enumerate(confirmed_roots):
                             if not isinstance(root, dict):
                                 findings.append(
@@ -1133,6 +1134,8 @@ def collect_contract_required_findings(
                                 ]
                                 if len(owners) == 1:
                                     owner_task, owner_task_id = owners[0]
+                                    if owner_task_id:
+                                        composition_owner_ids.add(owner_task_id)
                                     owner_contract = owner_task["taskContract"]
                                     if owner_contract.get("authorityRoot") != authority_path:
                                         findings.append(
@@ -1158,6 +1161,64 @@ def collect_contract_required_findings(
                                     paths=[authority_path] if authority_path else None,
                                 )
                             )
+                        if change_kind == "shared_interface":
+                            authority_owner_ids = {
+                                task_id
+                                for task, task_id in zip(valid_tasks, task_ids)
+                                if task_id
+                                and isinstance(task.get("taskContract"), dict)
+                                and authority_path in normalized_string_list(
+                                    task["taskContract"].get("writableFiles")
+                                )
+                            }
+                            for task, task_id in zip(valid_tasks, task_ids):
+                                if task_id not in authority_owner_ids | composition_owner_ids:
+                                    continue
+                                quality_gates = normalized_string_list(
+                                    task["taskContract"].get("verification", {}).get("qualityGates")
+                                )
+                                if "software_build" not in quality_gates:
+                                    continue
+                                missing_owners = sorted(
+                                    composition_owner_ids
+                                    - set(normalized_string_list(task.get("dependsOn")))
+                                    - {task_id}
+                                )
+                                if missing_owners:
+                                    findings.append(
+                                        _graph_finding(
+                                            "shared_interface_build_gate_premature",
+                                            "dependency_graph",
+                                            (
+                                                "software_build cannot run before all confirmed "
+                                                "shared-interface composition/export owners"
+                                            ),
+                                            task_id=task_id,
+                                            paths=[authority_path],
+                                            dependencies=missing_owners,
+                                        )
+                                    )
+                            if len(integration_tasks) == 1:
+                                integration_task = integration_tasks[0]
+                                integration_id = str(integration_task.get("id") or "")
+                                integration_gates = normalized_string_list(
+                                    integration_task["taskContract"]
+                                    .get("verification", {})
+                                    .get("qualityGates")
+                                )
+                                if "software_build" not in integration_gates:
+                                    findings.append(
+                                        _graph_finding(
+                                            "shared_interface_integration_build_missing",
+                                            "objective_coverage",
+                                            (
+                                                "final integration_proof must own software_build "
+                                                "for a shared-interface change"
+                                            ),
+                                            task_id=integration_id or None,
+                                            paths=[authority_path],
+                                        )
+                                    )
                 objective_id = str(objective.get("id") or payload.get("objectiveId") or "").strip()
                 manifest_tasks = manifest.get("tasks")
                 if not isinstance(manifest_tasks, list):
