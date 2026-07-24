@@ -110,6 +110,9 @@ Use this workflow for every contract-required graph:
 2. Give every slice a stable semantic `key`. Never change a key during correction.
    For a live graph amendment only, copy each existing child's authoritative ID into
    `persistedTaskId`; omit it for a genuinely new slice so the builder derives a new stable ID.
+   Also set manifest `operation="amend"` and `decompositionContractPatch` to the smallest
+   objective-contract update. The builder merges that patch with `--objective` and emits
+   `requestReview=false`, `operation="amend"`, and the complete amended contract.
 3. Assign objective requirements with stable IDs:
    - `ownership:<exact required path>`;
    - `proof:<zero-based proofExpected index>`;
@@ -135,7 +138,8 @@ python3 scripts/validate_decomposition_json.py \
 
 For a live amendment, also pass `--amend-baseline current-decomposition.json`. Only exact task-scoped
 findings already present on persisted children are reported as grandfathered. Graph findings and every
-new or changed task finding remain blocking.
+new or changed task finding remain blocking. Validation uses the builder-emitted amended contract, so
+new ownership paths cannot pass by being absent from the original objective file.
 
 8. If invalid, read the complete report once, edit the existing `manifest.json` in place, rebuild,
    and revalidate. Every correction must reduce the finding count without introducing a new finding

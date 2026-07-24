@@ -705,6 +705,91 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             self.assertEqual(payload["tasks"][0]["id"], persisted_id)
             self.assertEqual(payload["tasks"][1]["dependsOn"], [persisted_id])
 
+    def test_manifest_amendment_emits_mc_ready_envelope_and_validates_patched_contract(self) -> None:
+        manifest, objective = convergence_manifest()
+        additional_owner = manifest["tasks"][1]["contract"]["mutationRoot"]
+        manifest["operation"] = "amend"
+        manifest["decompositionContractPatch"] = {
+            "requiredOwnershipPaths": [
+                *objective["decompositionContract"]["requiredOwnershipPaths"],
+                additional_owner,
+            ],
+        }
+        manifest["tasks"][1]["requirements"].append(f"ownership:{additional_owner}")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            manifest_path = workspace / "manifest.json"
+            objective_path = workspace / "objective.json"
+            decomposition_path = workspace / "decomposition.json"
+            report_path = workspace / "report.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+
+            build = subprocess.run(
+                [
+                    "python3",
+                    str(CONTRACT_BUILDER),
+                    str(manifest_path),
+                    str(decomposition_path),
+                    "--objective",
+                    str(objective_path),
+                ],
+                cwd=workspace,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(build.returncode, 0, build.stderr)
+            payload = json.loads(decomposition_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["operation"], "amend")
+            self.assertFalse(payload["requestReview"])
+            self.assertIn(
+                additional_owner,
+                payload["decompositionContract"]["requiredOwnershipPaths"],
+            )
+
+            validation = subprocess.run(
+                [
+                    "python3",
+                    str(VALIDATOR),
+                    "--contract-required",
+                    str(decomposition_path),
+                    "8",
+                    "--objective",
+                    str(objective_path),
+                    "--manifest",
+                    str(manifest_path),
+                    "--report",
+                    str(report_path),
+                ],
+                cwd=workspace,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(validation.returncode, 0, validation.stderr)
+
+    def test_manifest_amendment_requires_objective_contract_input(self) -> None:
+        manifest = compact_manifest()
+        manifest["operation"] = "amend"
+        manifest["decompositionContractPatch"] = {"maxTaskCount": 4}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "manifest.json"
+            output = Path(temp_dir) / "decomposition.json"
+            source.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                ["python3", str(CONTRACT_BUILDER), str(source), str(output)],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("amendment manifest requires --objective", result.stderr)
+
     def test_manifest_rejects_duplicate_persisted_task_ids(self) -> None:
         manifest = compact_manifest()
         persisted_id = str(uuid.uuid4())

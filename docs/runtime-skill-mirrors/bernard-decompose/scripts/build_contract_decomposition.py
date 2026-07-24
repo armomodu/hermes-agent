@@ -62,7 +62,24 @@ def build_execution_plan(contract: dict, plan: dict, task_key: str) -> dict:
     }
 
 
-def expand_manifest(manifest: dict) -> dict:
+def build_amended_contract(manifest: dict, objective: object | None) -> dict | None:
+    operation = manifest.get("operation")
+    if operation is None:
+        return None
+    if operation != "amend":
+        raise ValueError("manifest operation must be amend when present")
+    if not isinstance(objective, dict):
+        raise ValueError("amendment manifest requires --objective")
+    objective_contract = objective.get("decompositionContract")
+    if not isinstance(objective_contract, dict):
+        raise ValueError("amendment objective requires decompositionContract")
+    patch = manifest.get("decompositionContractPatch")
+    if not isinstance(patch, dict) or not patch:
+        raise ValueError("amendment manifest requires decompositionContractPatch")
+    return {**objective_contract, **patch}
+
+
+def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
     if manifest.get("kind") != "contract-decomposition-manifest.v1":
         raise ValueError("kind must be contract-decomposition-manifest.v1")
     objective_id = require_text(manifest.get("objectiveId"), "objectiveId", "manifest")
@@ -133,7 +150,7 @@ def expand_manifest(manifest: dict) -> dict:
         if item.get("reviewMode"):
             task["reviewMode"] = require_text(item["reviewMode"], "reviewMode", key)
         tasks.append(task)
-    return {
+    payload = {
         "kind": "decomposition_result",
         "objectiveId": objective_id,
         "statusNote": require_text(manifest.get("statusNote"), "statusNote", "manifest"),
@@ -141,6 +158,12 @@ def expand_manifest(manifest: dict) -> dict:
         "actor": "Bernard",
         "tasks": tasks,
     }
+    amended_contract = build_amended_contract(manifest, objective)
+    if amended_contract is not None:
+        payload["operation"] = "amend"
+        payload["requestReview"] = False
+        payload["decompositionContract"] = amended_contract
+    return payload
 
 
 def main() -> int:
@@ -153,7 +176,12 @@ def main() -> int:
         return 2
     try:
         manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-        payload = expand_manifest(manifest)
+        objective = (
+            json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
+            if len(sys.argv) == 5
+            else None
+        )
+        payload = expand_manifest(manifest, objective)
         Path(sys.argv[2]).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         checkpoint = record_build(
             objective_id=payload["objectiveId"],

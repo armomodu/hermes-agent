@@ -604,7 +604,18 @@ def collect_contract_required_findings(
         findings.append(_graph_finding("kind_invalid", "objective_coverage", "kind must be decomposition_result"))
     if payload.get("actor") != "Bernard":
         findings.append(_graph_finding("actor_invalid", "objective_coverage", "actor must be Bernard"))
-    if payload.get("requestReview") is not True:
+    is_amendment = payload.get("operation") == "amend"
+    if is_amendment:
+        if payload.get("requestReview") is not False:
+            findings.append(_graph_finding("amendment_review_request_invalid", "objective_coverage", "amendment requestReview must be false"))
+        if not isinstance(payload.get("decompositionContract"), dict):
+            findings.append(_graph_finding("amendment_contract_missing", "objective_coverage", "amendment decompositionContract must be an object"))
+        if isinstance(manifest, dict):
+            if manifest.get("operation") != "amend":
+                findings.append(_graph_finding("manifest_amendment_operation_missing", "objective_coverage", "amendment manifest operation must be amend"))
+            if not isinstance(manifest.get("decompositionContractPatch"), dict):
+                findings.append(_graph_finding("manifest_amendment_contract_patch_missing", "objective_coverage", "amendment manifest requires decompositionContractPatch"))
+    elif payload.get("requestReview") is not True:
         findings.append(_graph_finding("review_request_missing", "objective_coverage", "requestReview must be true"))
     tasks = payload.get("tasks")
     if not isinstance(tasks, list) or not tasks:
@@ -643,7 +654,9 @@ def collect_contract_required_findings(
                 providers.setdefault(token, []).append(task_id)
 
     objective_contract = (
-        objective.get("decompositionContract")
+        payload.get("decompositionContract")
+        if is_amendment and isinstance(payload.get("decompositionContract"), dict)
+        else objective.get("decompositionContract")
         if isinstance(objective, dict)
         and isinstance(objective.get("decompositionContract"), dict)
         else {}
@@ -929,7 +942,11 @@ def collect_contract_required_findings(
             )
 
     if isinstance(objective, dict):
-        contract = objective.get("decompositionContract")
+        contract = (
+            payload.get("decompositionContract")
+            if is_amendment and isinstance(payload.get("decompositionContract"), dict)
+            else objective.get("decompositionContract")
+        )
         if isinstance(contract, dict):
             required_paths = normalized_string_list(contract.get("requiredOwnershipPaths"))
             for index, required_path in enumerate(required_paths):
