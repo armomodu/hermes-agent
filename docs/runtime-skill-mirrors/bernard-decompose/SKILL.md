@@ -133,6 +133,10 @@ python3 scripts/validate_decomposition_json.py \
   --report decomposition-validator-report.json
 ```
 
+For a live amendment, also pass `--amend-baseline current-decomposition.json`. Only exact task-scoped
+findings already present on persisted children are reported as grandfathered. Graph findings and every
+new or changed task finding remain blocking.
+
 8. If invalid, read the complete report once, edit the existing `manifest.json` in place, rebuild,
    and revalidate. Every correction must reduce the finding count without introducing a new finding
    fingerprint; `correction_rejected` means use the remaining bounded round or stop. Never patch

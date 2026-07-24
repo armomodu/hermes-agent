@@ -430,6 +430,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self,
         manifest: dict,
         objective: dict,
+        amend_baseline: dict | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], dict]:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -437,6 +438,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             objective_path = workspace / "objective.json"
             decomposition_path = workspace / "decomposition.json"
             report_path = workspace / "report.json"
+            baseline_path = workspace / "baseline.json"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             objective_path.write_text(json.dumps(objective), encoding="utf-8")
             build = subprocess.run(
@@ -454,20 +456,24 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(build.returncode, 0, build.stderr)
+            command = [
+                "python3",
+                str(VALIDATOR),
+                "--contract-required",
+                str(decomposition_path),
+                "8",
+                "--objective",
+                str(objective_path),
+                "--manifest",
+                str(manifest_path),
+                "--report",
+                str(report_path),
+            ]
+            if amend_baseline is not None:
+                baseline_path.write_text(json.dumps(amend_baseline), encoding="utf-8")
+                command.extend(["--amend-baseline", str(baseline_path)])
             validation = subprocess.run(
-                [
-                    "python3",
-                    str(VALIDATOR),
-                    "--contract-required",
-                    str(decomposition_path),
-                    "8",
-                    "--objective",
-                    str(objective_path),
-                    "--manifest",
-                    str(manifest_path),
-                    "--report",
-                    str(report_path),
-                ],
+                command,
                 cwd=workspace,
                 check=False,
                 capture_output=True,
@@ -599,6 +605,46 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(report["findingCount"], 0)
+
+    def test_amendment_grandfathers_only_exact_persisted_task_findings(self) -> None:
+        manifest, objective = convergence_manifest()
+        manifest["tasks"][0]["contract"]["verification"]["qualityGates"] = ["legacy_review"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "manifest.json"
+            payload_path = Path(temp_dir) / "payload.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            build = subprocess.run(
+                ["python3", str(CONTRACT_BUILDER), str(manifest_path), str(payload_path)],
+                cwd=temp_dir,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(build.returncode, 0, build.stderr)
+            baseline = json.loads(payload_path.read_text(encoding="utf-8"))
+
+        accepted, accepted_report = self.run_contract_validation(
+            manifest,
+            objective,
+            amend_baseline=baseline,
+        )
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(accepted_report["findingCount"], 0)
+        self.assertEqual(accepted_report["grandfatheredFindingCount"], 1)
+
+        manifest["tasks"][0]["contract"]["verification"]["qualityGates"] = [
+            "different_legacy_review"
+        ]
+        rejected, rejected_report = self.run_contract_validation(
+            manifest,
+            objective,
+            amend_baseline=baseline,
+        )
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn(
+            "unsupported_quality_gate",
+            {finding["code"] for finding in rejected_report["findings"]},
+        )
 
     def test_compact_manifest_expands_deterministically_with_ordered_plan(self) -> None:
         manifest = compact_manifest()

@@ -1161,6 +1161,7 @@ def emit_contract_required_report(
     max_tasks: int | None,
     objective: object | None,
     manifest: object | None,
+    amend_baseline: object | None,
     report_path: Path,
     workspace: Path,
 ) -> int:
@@ -1170,12 +1171,61 @@ def emit_contract_required_report(
         objective=objective,
         manifest=manifest,
     )
+    grandfathered_findings: list[dict] = []
+    if isinstance(amend_baseline, dict):
+        baseline_tasks = amend_baseline.get("tasks")
+        baseline_task_ids = {
+            str(task.get("id") or "").strip()
+            for task in baseline_tasks
+            if isinstance(task, dict)
+        } if isinstance(baseline_tasks, list) else set()
+        baseline_findings = collect_contract_required_findings(
+            amend_baseline,
+            max_tasks=max_tasks,
+            objective=objective,
+            manifest=None,
+        )
+
+        def finding_key(finding: dict) -> str:
+            return json.dumps(
+                {
+                    key: finding.get(key)
+                    for key in (
+                        "code",
+                        "group",
+                        "taskId",
+                        "requirementId",
+                        "paths",
+                        "dependencies",
+                        "message",
+                    )
+                },
+                sort_keys=True,
+            )
+
+        baseline_keys = {
+            finding_key(finding)
+            for finding in baseline_findings
+            if finding.get("taskId") in baseline_task_ids
+        }
+        active_findings = []
+        for finding in findings:
+            if (
+                finding.get("taskId") in baseline_task_ids
+                and finding_key(finding) in baseline_keys
+            ):
+                grandfathered_findings.append(finding)
+            else:
+                active_findings.append(finding)
+        findings = active_findings
     tasks = payload.get("tasks", []) if isinstance(payload, dict) else []
     report = {
         "version": "decomposition-validator-report.v1",
         "ok": not findings,
         "findingCount": len(findings),
         "findings": findings,
+        "grandfatheredFindingCount": len(grandfathered_findings),
+        "grandfatheredFindings": grandfathered_findings,
         "summary": {
             "taskCount": len(tasks) if isinstance(tasks, list) else 0,
             "taskFindings": sum(item["group"] == "task" for item in findings),
@@ -1229,6 +1279,7 @@ def main() -> int:
     if contract_required:
         objective_path: Path | None = None
         manifest_path: Path | None = None
+        amend_baseline_path: Path | None = None
         report_path = path.parent / "decomposition-validator-report.json"
         option_args = strict_args[1:] if max_arg is not None else strict_args
         index = 0
@@ -1246,6 +1297,10 @@ def main() -> int:
                 manifest_path = Path(option_args[index + 1])
                 index += 2
                 continue
+            if option == "--amend-baseline" and index + 1 < len(option_args):
+                amend_baseline_path = Path(option_args[index + 1])
+                index += 2
+                continue
             print(f"unknown contract-required option: {option}", file=sys.stderr)
             return 2
         objective = None
@@ -1254,11 +1309,15 @@ def main() -> int:
         manifest = None
         if manifest_path:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        amend_baseline = None
+        if amend_baseline_path:
+            amend_baseline = json.loads(amend_baseline_path.read_text(encoding="utf-8"))
         return emit_contract_required_report(
             payload,
             max_tasks=max_tasks,
             objective=objective,
             manifest=manifest,
+            amend_baseline=amend_baseline,
             report_path=report_path,
             workspace=path.parent,
         )
