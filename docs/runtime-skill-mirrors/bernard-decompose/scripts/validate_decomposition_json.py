@@ -1093,7 +1093,21 @@ def collect_contract_required_findings(
                             continue
                         key = str(manifest_task.get("key") or "").strip()
                         if namespace and key:
-                            expected_id = str(uuid.uuid5(namespace, key))
+                            persisted_task_id = manifest_task.get("persistedTaskId")
+                            if persisted_task_id is None:
+                                expected_id = str(uuid.uuid5(namespace, key))
+                            else:
+                                try:
+                                    expected_id = str(uuid.UUID(str(persisted_task_id)))
+                                except Exception:
+                                    findings.append(
+                                        _graph_finding(
+                                            "manifest_persisted_task_id_invalid",
+                                            "objective_coverage",
+                                            f"manifest key {key} has an invalid persistedTaskId",
+                                        )
+                                    )
+                                    continue
                             if expected_id not in payload_ids:
                                 findings.append(
                                     _graph_finding(

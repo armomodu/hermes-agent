@@ -108,6 +108,8 @@ Use this workflow for every contract-required graph:
 
 1. Write `manifest.json` with `kind="contract-decomposition-manifest.v1"`.
 2. Give every slice a stable semantic `key`. Never change a key during correction.
+   For a live graph amendment only, copy each existing child's authoritative ID into
+   `persistedTaskId`; omit it for a genuinely new slice so the builder derives a new stable ID.
 3. Assign objective requirements with stable IDs:
    - `ownership:<exact required path>`;
    - `proof:<zero-based proofExpected index>`;

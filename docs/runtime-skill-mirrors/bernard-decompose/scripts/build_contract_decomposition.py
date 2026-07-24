@@ -73,7 +73,18 @@ def expand_manifest(manifest: dict) -> dict:
     keys = [require_text(item.get("key"), "key", "task") for item in slices if isinstance(item, dict)]
     if len(keys) != len(slices) or len(set(keys)) != len(keys):
         raise ValueError("every task key must be unique")
-    ids = {key: str(uuid.uuid5(namespace, key)) for key in keys}
+    ids: dict[str, str] = {}
+    for item in slices:
+        key = item["key"]
+        persisted_task_id = item.get("persistedTaskId")
+        if persisted_task_id is None:
+            ids[key] = str(uuid.uuid5(namespace, key))
+            continue
+        persisted_id = require_text(persisted_task_id, "persistedTaskId", key)
+        uuid.UUID(persisted_id)
+        ids[key] = persisted_id
+    if len(set(ids.values())) != len(ids):
+        raise ValueError("every task id must be unique")
     tasks: list[dict] = []
     for item in slices:
         key = item["key"]

@@ -591,6 +591,15 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(report["findingCount"], 0)
 
+    def test_contract_validator_accepts_authoritative_ids_for_graph_amendment(self) -> None:
+        manifest, objective = convergence_manifest()
+        manifest["tasks"][0]["persistedTaskId"] = str(uuid.uuid4())
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["findingCount"], 0)
+
     def test_compact_manifest_expands_deterministically_with_ordered_plan(self) -> None:
         manifest = compact_manifest()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -627,6 +636,49 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 "consumedToken:artifact-registry-types-v1",
                 plan["steps"][1]["references"],
             )
+
+    def test_manifest_amendment_preserves_authoritative_persisted_task_ids(self) -> None:
+        manifest = compact_manifest()
+        persisted_id = str(uuid.uuid4())
+        manifest["tasks"][0]["persistedTaskId"] = persisted_id
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "manifest.json"
+            output = Path(temp_dir) / "decomposition.json"
+            source.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                ["python3", str(CONTRACT_BUILDER), str(source), str(output)],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["tasks"][0]["id"], persisted_id)
+            self.assertEqual(payload["tasks"][1]["dependsOn"], [persisted_id])
+
+    def test_manifest_rejects_duplicate_persisted_task_ids(self) -> None:
+        manifest = compact_manifest()
+        persisted_id = str(uuid.uuid4())
+        manifest["tasks"][0]["persistedTaskId"] = persisted_id
+        manifest["tasks"][1]["persistedTaskId"] = persisted_id
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "manifest.json"
+            output = Path(temp_dir) / "decomposition.json"
+            source.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                ["python3", str(CONTRACT_BUILDER), str(source), str(output)],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("every task id must be unique", result.stderr)
 
     def test_compact_manifest_rejects_unknown_dependency_key(self) -> None:
         manifest = compact_manifest()
