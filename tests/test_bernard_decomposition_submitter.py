@@ -74,6 +74,7 @@ def test_submit_uses_authenticated_json_request_without_shell():
     assert request.method == "POST"
     assert json.loads(request.data) == payload
     assert request.headers["Authorization"] == "Bearer secret-token"
+    assert request.headers["User-agent"] == "Hermes-Mission-Control/1.0"
 
 
 def test_submit_rejects_insecure_non_local_endpoint():
@@ -94,6 +95,7 @@ def test_submitter_cli_posts_exact_payload(tmp_path: Path):
         def do_POST(self):
             received["path"] = self.path
             received["authorization"] = self.headers.get("Authorization")
+            received["userAgent"] = self.headers.get("User-Agent")
             received["payload"] = json.loads(
                 self.rfile.read(int(self.headers["Content-Length"])),
             )
@@ -147,6 +149,7 @@ def test_submitter_cli_posts_exact_payload(tmp_path: Path):
     assert received == {
         "path": "/api/objectives/objective-e2e/decompose",
         "authorization": "Bearer test-token",
+        "userAgent": "Hermes-Mission-Control/1.0",
         "payload": payload,
     }
     assert json.loads(response_path.read_text()) == {"ok": True, "taskCount": 1}

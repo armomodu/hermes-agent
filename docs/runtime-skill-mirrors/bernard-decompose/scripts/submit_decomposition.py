@@ -13,6 +13,9 @@ import urllib.request
 from pathlib import Path
 
 
+SERVICE_USER_AGENT = "Hermes-Mission-Control/1.0"
+
+
 def load_payload(path: Path) -> dict:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or payload.get("kind") != "decomposition_result":
@@ -45,6 +48,7 @@ def submit(payload: dict, api_base: str, token: str, timeout: float) -> tuple[in
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "User-Agent": SERVICE_USER_AGENT,
         },
         method="POST",
     )

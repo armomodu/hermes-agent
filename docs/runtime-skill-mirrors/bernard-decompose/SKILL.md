@@ -165,7 +165,8 @@ Resume the recorded manifest and correction round. A missing checkpoint is a con
 not reconstruct from memory.
 11. Submit the exact validated `decomposition.json` once through the bounded helper. It reads
    `MC_API_URL` and `CRON_SERVICE_TOKEN` from the environment, performs one authenticated JSON POST,
-   and avoids shell pipes or `curl --data-binary` patterns that trigger terminal approval:
+   identifies itself as the Hermes Mission Control service at the public edge, and avoids shell
+   pipes or `curl --data-binary` patterns that trigger terminal approval:
 
 ```bash
 python3 scripts/submit_decomposition.py \
