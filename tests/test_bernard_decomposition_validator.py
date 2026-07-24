@@ -21,6 +21,10 @@ CHECKPOINT = (
     REPO_ROOT
     / "docs/runtime-skill-mirrors/bernard-decompose/scripts/decomposition_checkpoint.py"
 )
+AUTHORITY_IMPACT_COLLECTOR = (
+    REPO_ROOT
+    / "docs/runtime-skill-mirrors/bernard-decompose/scripts/collect_authority_impact.py"
+)
 SKILL = REPO_ROOT / "docs/runtime-skill-mirrors/bernard-decompose/SKILL.md"
 
 
@@ -422,6 +426,55 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 text=True,
             )
 
+    def run_contract_validation(
+        self,
+        manifest: dict,
+        objective: dict,
+    ) -> tuple[subprocess.CompletedProcess[str], dict]:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            manifest_path = workspace / "manifest.json"
+            objective_path = workspace / "objective.json"
+            decomposition_path = workspace / "decomposition.json"
+            report_path = workspace / "report.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            build = subprocess.run(
+                [
+                    "python3",
+                    str(CONTRACT_BUILDER),
+                    str(manifest_path),
+                    str(decomposition_path),
+                    "--objective",
+                    str(objective_path),
+                ],
+                cwd=workspace,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(build.returncode, 0, build.stderr)
+            validation = subprocess.run(
+                [
+                    "python3",
+                    str(VALIDATOR),
+                    "--contract-required",
+                    str(decomposition_path),
+                    "8",
+                    "--objective",
+                    str(objective_path),
+                    "--manifest",
+                    str(manifest_path),
+                    "--report",
+                    str(report_path),
+                ],
+                cwd=workspace,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            return validation, json.loads(report_path.read_text(encoding="utf-8"))
+
     def test_valid_repair_passes(self) -> None:
         result = self.run_validator(repair_payload(), "--repair")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -431,11 +484,112 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         skill = SKILL.read_text(encoding="utf-8")
         self.assertLess(len(skill.splitlines()), 250)
         self.assertIn("Canonical Manifest Workflow", skill)
+        self.assertIn("collect_authority_impact.py", skill)
+        self.assertIn("Search candidates are evidence, not automatic", skill)
         self.assertIn("decomposition_checkpoint.py resume", skill)
         self.assertIn("Never change a key during correction", skill)
         self.assertIn("read the complete report once", skill)
         self.assertIn("Every listed path must have exactly one explicit writable owner", skill)
         self.assertIn("One final `integration_proof`", skill)
+
+    def test_authority_impact_collector_finds_reference_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            authority = repo / "src/storage-adapter-interface.ts"
+            composition = repo / "src/file-adapter.ts"
+            request = repo / "authority-impact-request.json"
+            output = repo / "authority-impact.json"
+            authority.parent.mkdir(parents=True)
+            authority.write_text("export interface StorageAdapter {}\n", encoding="utf-8")
+            composition.write_text(
+                "import type { StorageAdapter } from './storage-adapter-interface';\n",
+                encoding="utf-8",
+            )
+            request.write_text(json.dumps({
+                "kind": "authority-impact-request.v1",
+                "authorities": [{
+                    "path": "src/storage-adapter-interface.ts",
+                    "symbols": ["StorageAdapter"],
+                    "changeKind": "shared_interface",
+                }],
+            }), encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(AUTHORITY_IMPACT_COLLECTOR),
+                    "--repo",
+                    str(repo),
+                    "--request",
+                    str(request),
+                    "--output",
+                    str(output),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            evidence = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(
+                evidence["authorities"][0]["candidates"],
+                [{"path": "src/file-adapter.ts", "matchedSymbols": ["StorageAdapter"]}],
+            )
+
+    def test_shared_interface_impact_requires_composition_or_export_owner(self) -> None:
+        manifest, objective = convergence_manifest()
+        implementation_path = objective["decompositionContract"]["requiredOwnershipPaths"][0]
+        manifest["authorityImpact"] = [{
+            "authorityPath": "apps/mission-control/src/lib/storage/storage-adapter-interface.ts",
+            "changeKind": "shared_interface",
+            "symbols": ["StorageAdapter"],
+            "candidates": [{"path": implementation_path, "matchedSymbols": ["StorageAdapter"]}],
+            "confirmedRoots": [{"path": implementation_path, "role": "implementation"}],
+        }]
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "shared_interface_composition_owner_missing",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+    def test_confirmed_authority_impact_root_must_be_required_and_owned(self) -> None:
+        manifest, objective = convergence_manifest()
+        omitted_path = "apps/mission-control/src/lib/storage/file-adapter.ts"
+        manifest["authorityImpact"] = [{
+            "authorityPath": "apps/mission-control/src/lib/storage/storage-adapter-interface.ts",
+            "changeKind": "shared_interface",
+            "symbols": ["StorageAdapter"],
+            "candidates": [{"path": omitted_path, "matchedSymbols": ["StorageAdapter"]}],
+            "confirmedRoots": [{"path": omitted_path, "role": "composition"}],
+        }]
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "authority_impact_ownership_requirement_missing",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+    def test_valid_authority_impact_is_accepted_with_existing_exact_owner(self) -> None:
+        manifest, objective = convergence_manifest()
+        implementation_path = objective["decompositionContract"]["requiredOwnershipPaths"][0]
+        manifest["authorityImpact"] = [{
+            "authorityPath": "apps/mission-control/src/lib/storage/storage-adapter-interface.ts",
+            "changeKind": "shared_interface",
+            "symbols": ["StorageAdapter"],
+            "candidates": [{"path": implementation_path, "matchedSymbols": ["StorageAdapter"]}],
+            "confirmedRoots": [{"path": implementation_path, "role": "composition"}],
+        }]
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["findingCount"], 0)
 
     def test_compact_manifest_expands_deterministically_with_ordered_plan(self) -> None:
         manifest = compact_manifest()

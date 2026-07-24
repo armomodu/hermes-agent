@@ -47,6 +47,15 @@ SUPPORTED_QUALITY_GATES = {
     "software_build",
 }
 
+AUTHORITY_IMPACT_ROLES = {
+    "implementation",
+    "export",
+    "composition",
+    "persistence",
+    "api",
+    "integration_proof",
+}
+
 
 def classify_writable_cluster(path: str) -> str | None:
     cleaned = path.replace("**", "").rstrip("/")
@@ -942,6 +951,106 @@ def collect_contract_required_findings(
                         )
                     )
             if isinstance(manifest, dict):
+                authority_impact = manifest.get("authorityImpact")
+                if authority_impact is not None and not isinstance(authority_impact, list):
+                    findings.append(
+                        _graph_finding(
+                            "authority_impact_invalid",
+                            "objective_coverage",
+                            "canonical manifest authorityImpact must be a list",
+                        )
+                    )
+                elif isinstance(authority_impact, list):
+                    for impact_index, impact in enumerate(authority_impact):
+                        if not isinstance(impact, dict):
+                            findings.append(
+                                _graph_finding(
+                                    "authority_impact_invalid",
+                                    "objective_coverage",
+                                    f"authorityImpact[{impact_index}] must be an object",
+                                )
+                            )
+                            continue
+                        authority_path = str(impact.get("authorityPath") or "").strip()
+                        change_kind = str(impact.get("changeKind") or "").strip()
+                        symbols = normalized_string_list(impact.get("symbols"))
+                        candidate_paths = {
+                            str(candidate.get("path") or "").strip()
+                            for candidate in impact.get("candidates", [])
+                            if isinstance(candidate, dict)
+                        }
+                        confirmed_roots = impact.get("confirmedRoots")
+                        if not authority_path or not symbols:
+                            findings.append(
+                                _graph_finding(
+                                    "authority_impact_invalid",
+                                    "objective_coverage",
+                                    f"authorityImpact[{impact_index}] requires authorityPath and symbols",
+                                )
+                            )
+                        if not isinstance(confirmed_roots, list) or not confirmed_roots:
+                            findings.append(
+                                _graph_finding(
+                                    "authority_impact_roots_missing",
+                                    "objective_coverage",
+                                    f"authorityImpact[{impact_index}] requires confirmedRoots",
+                                    paths=[authority_path] if authority_path else None,
+                                )
+                            )
+                            continue
+                        confirmed_roles: set[str] = set()
+                        for root_index, root in enumerate(confirmed_roots):
+                            if not isinstance(root, dict):
+                                findings.append(
+                                    _graph_finding(
+                                        "authority_impact_root_invalid",
+                                        "objective_coverage",
+                                        f"authorityImpact[{impact_index}].confirmedRoots[{root_index}] must be an object",
+                                    )
+                                )
+                                continue
+                            path = str(root.get("path") or "").strip()
+                            role = str(root.get("role") or "").strip()
+                            confirmed_roles.add(role)
+                            if not path or "*" in path or role not in AUTHORITY_IMPACT_ROLES:
+                                findings.append(
+                                    _graph_finding(
+                                        "authority_impact_root_invalid",
+                                        "objective_coverage",
+                                        f"confirmed authority-impact root requires an exact path and supported role: {path or '<missing>'}",
+                                        paths=[path] if path else None,
+                                    )
+                                )
+                                continue
+                            if path != authority_path and path not in candidate_paths:
+                                findings.append(
+                                    _graph_finding(
+                                        "authority_impact_evidence_missing",
+                                        "objective_coverage",
+                                        f"confirmed root is not traceable to collected source-reference evidence: {path}",
+                                        paths=[path],
+                                    )
+                                )
+                            if path not in required_paths:
+                                findings.append(
+                                    _graph_finding(
+                                        "authority_impact_ownership_requirement_missing",
+                                        "objective_coverage",
+                                        f"confirmed authority-impact root is absent from requiredOwnershipPaths: {path}",
+                                        paths=[path],
+                                    )
+                                )
+                        if change_kind == "shared_interface" and not (
+                            {"composition", "export"} & confirmed_roles
+                        ):
+                            findings.append(
+                                _graph_finding(
+                                    "shared_interface_composition_owner_missing",
+                                    "objective_coverage",
+                                    "shared interface change requires a confirmed composition or export root",
+                                    paths=[authority_path] if authority_path else None,
+                                )
+                            )
                 objective_id = str(objective.get("id") or payload.get("objectiveId") or "").strip()
                 manifest_tasks = manifest.get("tasks")
                 if not isinstance(manifest_tasks, list):

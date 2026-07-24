@@ -35,6 +35,31 @@ Do not execute implementation work, approve the objective, activate it, or relea
 Do not encode objective-specific policy in this skill. Do not use prior graphs, memory, or nearby
 files as authority when the live objective provides a contract.
 
+### Authority Impact
+
+Before shaping tasks for a changed shared interface:
+
+1. Write `authority-impact-request.json` with the changed authority path, exported symbols, and
+   `changeKind="shared_interface"`.
+2. Collect source-reference candidates:
+
+```bash
+python3 scripts/collect_authority_impact.py \
+  --repo "$REPO_ROOT" \
+  --request authority-impact-request.json \
+  --output authority-impact.json
+```
+
+3. Inspect the candidates and confirm only semantically required implementation, export,
+   composition, persistence, API, and integration-proof roots.
+4. Copy the collector result into manifest `authorityImpact`, add exact `confirmedRoots` with one
+   supported role each, and add every confirmed path to `requiredOwnershipPaths`.
+5. Assign each confirmed path to exactly one task. Search candidates are evidence, not automatic
+   tasks.
+
+For a shared interface, at least one confirmed composition or export root is mandatory. Never infer
+impact from prose alone or omit a confirmed root because another task owns the interface definition.
+
 ## Contract-Required Decomposition
 
 When `decompositionContract.taskContractRequired=true`, every child uses
