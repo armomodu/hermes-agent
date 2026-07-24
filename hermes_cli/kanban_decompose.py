@@ -48,6 +48,10 @@ from hermes_cli import profiles as profiles_mod
 
 logger = logging.getLogger(__name__)
 
+_CONTROL_TASK_MARKER = re.compile(
+    r"(?mi)^\s*(?:Task Type|MC Completion Contract):\s*\S+",
+)
+
 
 _SYSTEM_PROMPT = """You are the Kanban decomposer for the Hermes Agent board.
 
@@ -475,3 +479,29 @@ def list_triage_ids(*, tenant: Optional[str] = None) -> list[str]:
             limit=1000,
         )
     return [row.id for row in rows]
+
+
+def is_auto_decompose_eligible(task: kb.Task) -> bool:
+    """Return whether a triage task is unstructured intake safe to fan out.
+
+    Explicit skills and control-contract markers mean another workflow already
+    owns the task shape. Manual ``hermes kanban decompose`` remains available
+    for operators who intentionally want to override this automatic guard.
+    """
+    if task.status != "triage":
+        return False
+    if task.skills:
+        return False
+    return _CONTROL_TASK_MARKER.search(task.body or "") is None
+
+
+def list_auto_decompose_ids(*, tenant: Optional[str] = None) -> list[str]:
+    """Return only unstructured triage intake eligible for automatic fan-out."""
+    with kb.connect_closing() as conn:
+        rows = kb.list_tasks(
+            conn,
+            status="triage",
+            tenant=tenant,
+            limit=1000,
+        )
+    return [row.id for row in rows if is_auto_decompose_eligible(row)]

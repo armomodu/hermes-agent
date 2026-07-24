@@ -326,6 +326,44 @@ def test_decompose_returns_false_when_task_not_triage(kanban_home):
     assert "not in triage" in outcome.reason
 
 
+def test_auto_decompose_excludes_structured_control_tasks(kanban_home):
+    with kb.connect() as conn:
+        ordinary = kb.create_task(
+            conn,
+            title="rough product idea",
+            body="Explore and ship the idea.",
+            triage=True,
+        )
+        control = kb.create_task(
+            conn,
+            title="Execute Decompose objective",
+            body="Objective: objective-1\n\nTask Type: decompose",
+            triage=True,
+        )
+        skilled = kb.create_task(
+            conn,
+            title="Repair a contract",
+            body="Use the assigned specialist workflow.",
+            skills=["bernard-decompose"],
+            triage=True,
+        )
+
+    assert set(decomp.list_triage_ids()) == {ordinary, control, skilled}
+    assert decomp.list_auto_decompose_ids() == [ordinary]
+
+
+def test_auto_decompose_excludes_completion_contract_marker(kanban_home):
+    with kb.connect() as conn:
+        control = kb.create_task(
+            conn,
+            title="Return governed evidence",
+            body="MC Completion Contract: execution_result",
+            triage=True,
+        )
+
+    assert decomp.list_auto_decompose_ids() == []
+
+
 def test_decompose_no_aux_client_configured(kanban_home):
     with kb.connect() as conn:
         tid = kb.create_task(conn, title="x", triage=True)
