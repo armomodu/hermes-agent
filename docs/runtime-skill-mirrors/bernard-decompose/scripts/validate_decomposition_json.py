@@ -41,6 +41,12 @@ GENERIC_AUTHORITY_ROOTS = {
     "apps/mission-control/src/lib",
 }
 
+SUPPORTED_QUALITY_GATES = {
+    "software_test",
+    "software_lint",
+    "software_build",
+}
+
 
 def classify_writable_cluster(path: str) -> str | None:
     cleaned = path.replace("**", "").rstrip("/")
@@ -321,6 +327,13 @@ def collect_task_contract_local_findings(
         verification = {}
     focused_tests = normalized_string_list(verification.get("focusedTests"))
     quality_gates = normalized_string_list(verification.get("qualityGates"))
+    for quality_gate in quality_gates:
+        if quality_gate not in SUPPORTED_QUALITY_GATES:
+            add(
+                "unsupported_quality_gate",
+                f"unsupported quality gate for {task_id}: {quality_gate}",
+                [quality_gate],
+            )
     if "software_test" in quality_gates:
         if strict_graph and not proof_files:
             add(

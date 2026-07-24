@@ -60,6 +60,8 @@ Hard boundaries:
   prove itself.
 - A task with `proofFiles=[]` must not request `software_test`. Put executable tests and that gate on a
   separate proof-only task, and keep every `focusedTests` path inside its declared `proofFiles`.
+- `verification.qualityGates` uses only `software_test`, `software_lint`, and `software_build`.
+  Do not invent aliases such as `mission_control_build`; the validator rejects unknown gate names.
 - New or changed proof belongs to a proof-only task whose mutation and proof root are the exact proof
   file.
 - `readOnlyAnchors` never overlap writable or created scope.

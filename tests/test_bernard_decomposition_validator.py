@@ -1030,6 +1030,17 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("software_test_proof_missing", result.stderr)
 
+    def test_contract_required_rejects_unsupported_quality_gate(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][1]["taskContract"]["verification"]["qualityGates"] = [
+            "software_test",
+            "mission_control_build",
+        ]
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported_quality_gate", result.stderr)
+        self.assertIn("mission_control_build", result.stderr)
+
     def test_contract_required_rejects_focused_test_outside_proof_files(self) -> None:
         payload = contract_required_payload()
         proof_contract = payload["tasks"][1]["taskContract"]
