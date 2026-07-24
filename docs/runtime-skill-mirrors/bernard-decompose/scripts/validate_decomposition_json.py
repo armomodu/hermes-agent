@@ -817,6 +817,27 @@ def collect_contract_required_findings(
                         paths=sorted(set(leaked_tests + leaked_proof_creations)),
                     )
                 )
+        if objective_contract.get("taskContractRequired") is True:
+            allowed_expansion = normalized_string_list(
+                objective_contract.get("allowedExpansionZone")
+            )
+            for created_file in created_files:
+                if not any(
+                    _path_within_root(created_file, allowed_root)
+                    for allowed_root in allowed_expansion
+                ):
+                    findings.append(
+                        _graph_finding(
+                            "unauthorized_created_file_glob",
+                            "task",
+                            (
+                                "created-file scope is outside allowedExpansionZone "
+                                f"for {task_id}: {created_file}"
+                            ),
+                            task_id=task_id or None,
+                            paths=[created_file],
+                        )
+                    )
         leaked_manifests = [
             path for path in writable_files
             if path.endswith("package.json") or path.endswith("package-lock.json") or "node_modules" in path

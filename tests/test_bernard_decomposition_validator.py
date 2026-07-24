@@ -408,6 +408,10 @@ def convergence_manifest() -> tuple[dict, dict]:
             "maxTaskCount": 8,
             "requiredOwnershipPaths": [implementation_file],
             "proofExpected": ["The bounded release proof passes"],
+            "allowedExpansionZone": [
+                "apps/mission-control/src/lib/knowledge-plane/contracts/**",
+                "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+            ],
         },
     }
     return manifest, objective
@@ -1402,6 +1406,49 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("multiple_mutation_clusters", result.stderr)
+
+    def test_contract_required_rejects_created_file_outside_expansion_zone(self) -> None:
+        payload = contract_required_payload()
+        objective = {
+            "id": str(uuid.uuid4()),
+            "decompositionContract": {
+                "taskContractRequired": True,
+                "maxTaskCount": 8,
+                "allowedExpansionZone": [
+                    "apps/mission-control/src/lib/knowledge-plane/__tests__/**",
+                    "apps/mission-control/src/lib/knowledge-plane/contracts/**",
+                ],
+                "sourceAnchors": [
+                    "apps/mission-control/src/lib/release/objective-release-service.ts",
+                ],
+            },
+        }
+        payload["tasks"][1]["taskContract"]["createdFileGlobs"] = [
+            "apps/mission-control/src/app/api/knowledge/records/route.ts",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload_path = Path(temp_dir) / "payload.json"
+            objective_path = Path(temp_dir) / "objective.json"
+            report_path = Path(temp_dir) / "report.json"
+            payload_path.write_text(json.dumps(payload), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(VALIDATOR),
+                    "--contract-required",
+                    str(payload_path),
+                    "--objective",
+                    str(objective_path),
+                    "--report",
+                    str(report_path),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unauthorized_created_file_glob", result.stderr)
 
     def test_contract_required_rejects_read_only_writable_overlap(self) -> None:
         payload = contract_required_payload()

@@ -111,7 +111,10 @@ Do not hide existing ownership behind a parent `/**` glob.
 
 Use this workflow for every contract-required graph:
 
-1. Write `manifest.json` with `kind="contract-decomposition-manifest.v1"`.
+1. If the objective exposes `lastDecompositionCandidate` and `lastDecompositionLintErrors`, use
+   that candidate as the canonical prior draft: preserve task IDs and slices, reconstruct
+   `manifest.json`, and correct only reported findings. Otherwise create the initial
+   `contract-decomposition-manifest.v1` manifest.
 2. Give every slice a stable semantic `key`. Never change a key during correction.
    For a live graph amendment only, copy each existing child's authoritative ID into
    `persistedTaskId` and copy its accepted live `taskContract` exactly; omit the ID only for a
@@ -182,16 +185,14 @@ objective before deciding whether submission may be retried.
 python3 scripts/decomposition_checkpoint.py mark accepted
 ```
 
-This archives the canonical manifest, compiled decomposition, validator report, checkpoint, and
-metrics outside the disposable task workspace.
-
-13. Report convergence metrics:
-
+13. Complete only after `checkpointStatus="accepted"`, passing the exact validated
+    `decomposition.json` as the result. The guard rejects other results; acceptance archives artifacts.
+14. Report convergence metrics:
 ```bash
 python3 scripts/decomposition_checkpoint.py metrics
 ```
 
-14. Read the response. Stop on any rejection; report the exact finding rather than improvising a
+15. Read the response. Stop on any rejection; report the exact finding rather than improvising a
    legacy or smaller graph.
 
 The expander creates deterministic UUIDs and plan structure only. The batch validator remains the
