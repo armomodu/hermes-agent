@@ -508,6 +508,52 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertIn("Production Delivery Profiles", skill)
         self.assertIn("productionGateReviewer", skill)
 
+    def test_structured_approved_slice_requirement_is_enforced(self) -> None:
+        manifest, objective = convergence_manifest()
+        objective["decompositionContract"]["approvedSlices"] = [{
+            "name": "Author bounded release contract",
+            "required": True,
+            "workflowFamily": "release-contract",
+            "primaryArtifactClass": "contract_family",
+        }]
+        manifest["tasks"][0]["requirements"].append("slice:0")
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["findingCount"], 0)
+
+    def test_unassigned_structured_approved_slice_is_rejected(self) -> None:
+        manifest, objective = convergence_manifest()
+        objective["decompositionContract"]["approvedSlices"] = [{
+            "name": "Author bounded release contract",
+            "required": True,
+            "workflowFamily": "release-contract",
+            "primaryArtifactClass": "contract_family",
+        }]
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertNotEqual(result.returncode, 0)
+        finding = next(
+            item
+            for item in report["findings"]
+            if item["code"] == "objective_requirement_coverage_invalid"
+        )
+        self.assertEqual(finding["requirementId"], "approvedSlices[0]")
+
+    def test_legacy_string_approved_slice_remains_supported(self) -> None:
+        manifest, objective = convergence_manifest()
+        objective["decompositionContract"]["approvedSlices"] = [
+            "Author bounded release contract"
+        ]
+        manifest["tasks"][0]["requirements"].append("slice:0")
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["findingCount"], 0)
+
     def test_authority_impact_collector_finds_reference_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)

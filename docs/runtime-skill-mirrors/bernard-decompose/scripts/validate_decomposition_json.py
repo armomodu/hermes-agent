@@ -1302,9 +1302,17 @@ def collect_contract_required_findings(
                             for index, _ in enumerate(normalized_string_list(contract.get("proofExpected")))
                         },
                     }
-                    approved_slices = normalized_string_list(
+                    approved_slices_value = (
                         contract.get("approvedSlices")
                         or objective.get("approvedSlices")
+                    )
+                    # Mission Control stores approved slices as structured
+                    # records, while legacy objectives may still use strings.
+                    # Requirement identity is positional for both shapes.
+                    approved_slices = (
+                        approved_slices_value
+                        if isinstance(approved_slices_value, list)
+                        else []
                     )
                     expected_requirements.update(
                         {

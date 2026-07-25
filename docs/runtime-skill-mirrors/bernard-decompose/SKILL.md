@@ -124,7 +124,7 @@ Use this workflow for every contract-required graph:
 3. Assign objective requirements with stable IDs:
    - `ownership:<exact required path>`;
    - `proof:<zero-based proofExpected index>`;
-   - `slice:<zero-based approvedSlices index>`.
+   - `slice:<zero-based approvedSlices index>` (position-based for string or structured records).
 4. Express dependencies by key.
 5. Put all task-specific contract truth in each `contract`, including a compact `plan`.
 6. Expand and checkpoint:
