@@ -81,8 +81,8 @@ Hard boundaries:
 - Consume sibling outputs through tokens; never mass-reuse an unrelated generic authority or proof.
 - Generic proof tasks do not invent authority JSON. Only real authority extraction produces a named
   evidence artifact.
-- One final `integration_proof` execution task depends on every preceding execution slice.
-- One final read-only `gate_review` depends on the integration proof and all required execution work.
+- One final `integration_proof` depends on every preceding execution slice and consumes every token they provide.
+- One final read-only `gate_review` depends on all required execution work and declares no writable or created-file scope.
 Start from `requiredOwnershipPaths`. Assign each requirement to its one actual writable owner.
 Do not hide existing ownership behind a parent `/**` glob.
 ### Production Delivery Profiles

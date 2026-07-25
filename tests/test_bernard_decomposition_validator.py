@@ -1810,6 +1810,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             }]
             auth_contract["provides"].append("auth-proof-v1")
             integration_contract = payload["tasks"][2]["taskContract"]
+            integration_contract["consumes"].append("auth-proof-v1")
             integration_contract["productionEvidence"] = [{
                 "category": "final_integration_proof",
                 "evidenceToken": "integration-proof-v1",
@@ -1834,6 +1835,28 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(valid.returncode, 0, valid.stderr)
+
+    def test_contract_required_final_integration_consumes_every_upstream_token(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][2]["taskContract"]["consumes"].remove("release-contract-v1")
+
+        result = self.run_validator(payload, "--contract-required")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("integration_proof_tokens_missing", result.stderr)
+        self.assertIn("release-contract-v1", result.stderr)
+
+    def test_contract_required_gate_review_is_read_only(self) -> None:
+        payload = contract_required_payload()
+        gate_contract = payload["tasks"][3]["taskContract"]
+        gate_contract["createdFileGlobs"] = [
+            "apps/mission-control/docs/knowledge-plane/gate-review.md"
+        ]
+
+        result = self.run_validator(payload, "--contract-required")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gate_review_not_read_only", result.stderr)
 
     def test_contract_required_rejects_proof_creation_in_normal_slice(self) -> None:
         payload = contract_required_payload()

@@ -1065,6 +1065,21 @@ def collect_contract_required_findings(
     if gate and gate.get("reviewMode") != "gate_review":
         findings.append(_graph_finding("gate_review_mode_invalid", "objective_coverage", "review task must use reviewMode=gate_review", task_id=str(gate.get("id") or "") or None))
     if gate:
+        gate_contract = gate.get("taskContract") if isinstance(gate.get("taskContract"), dict) else {}
+        gate_writable_paths = (
+            normalized_string_list(gate_contract.get("writableFiles"))
+            + normalized_string_list(gate_contract.get("createdFileGlobs"))
+        )
+        if gate_writable_paths:
+            findings.append(
+                _graph_finding(
+                    "gate_review_not_read_only",
+                    "task",
+                    "gate_review must not declare writableFiles or createdFileGlobs",
+                    task_id=str(gate.get("id") or "") or None,
+                    paths=sorted(set(gate_writable_paths)),
+                )
+            )
         missing_gate_dependencies = sorted(execution_ids - gate_deps)
         if missing_gate_dependencies:
             findings.append(
@@ -1138,6 +1153,34 @@ def collect_contract_required_findings(
                     f"integration_proof missing execution dependencies: {missing_integration}",
                     task_id=integration_id or None,
                     dependencies=missing_integration,
+                )
+            )
+        integration_contract = integration.get("taskContract")
+        integration_consumes = set(
+            normalized_string_list(
+                integration_contract.get("consumes")
+                if isinstance(integration_contract, dict)
+                else []
+            )
+        )
+        upstream_tokens = {
+            token
+            for task in valid_tasks
+            if task.get("taskType") == "execution" and task is not integration
+            for token in normalized_string_list(
+                task["taskContract"].get("provides")
+                if isinstance(task.get("taskContract"), dict)
+                else []
+            )
+        }
+        missing_integration_tokens = sorted(upstream_tokens - integration_consumes)
+        if missing_integration_tokens:
+            findings.append(
+                _graph_finding(
+                    "integration_proof_tokens_missing",
+                    "dependency_graph",
+                    f"integration_proof missing upstream tokens: {missing_integration_tokens}",
+                    task_id=integration_id or None,
                 )
             )
         if gate and integration_id not in gate_deps:
