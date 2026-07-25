@@ -97,7 +97,7 @@ def initialize_manifest(objective: dict) -> dict:
                     "derive": "",
                     "apply": "",
                     "verify": "",
-                    "operation": "",
+                    "operation": "modify",
                     "symbols": [],
                     "invariant": "",
                     "completionChecks": [],
@@ -112,6 +112,33 @@ def initialize_manifest(objective: dict) -> dict:
         "kind": "contract-decomposition-manifest.v1",
         "objectiveId": objective_id,
         "statusNote": "",
+        "contractGuide": {
+            "planOperations": ["add", "modify", "remove"],
+            "unassignedRequirements": [
+                *[
+                    f"ownership:{path}"
+                    for path in contract.get("requiredOwnershipPaths", [])
+                    if isinstance(path, str) and path.strip()
+                ],
+                *[
+                    f"proof:{index}"
+                    for index, _proof in enumerate(contract.get("proofExpected", []))
+                ],
+            ],
+            "requiredProductionEvidence": [
+                category
+                for category in contract.get("requiredProductionEvidence", [])
+                if isinstance(category, str) and category.strip()
+            ],
+            "rootRules": [
+                "Assign every contractGuide.unassignedRequirements entry exactly once.",
+                "Use an exact file mutationRoot when writableFiles contains one exact file.",
+                "Keep createdFileGlobs equal to or below mutationRoot; use an exact new file path when known.",
+                "Implementation proofRoot is read-only and must not overlap writable or created scope.",
+                "The final integration proof depends on every preceding execution task.",
+                "The gate review is read-only and depends on every execution task.",
+            ],
+        },
         "tasks": tasks,
     }
 

@@ -427,6 +427,27 @@ def convergence_manifest() -> tuple[dict, dict]:
 
 
 class BernardDecompositionValidatorTest(unittest.TestCase):
+    def _initialize_manifest(self, objective: dict) -> dict:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            objective_path = Path(temp_dir) / "objective.json"
+            manifest_path = Path(temp_dir) / "manifest.json"
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(CONTRACT_BUILDER),
+                    "--init-manifest",
+                    str(objective_path),
+                    str(manifest_path),
+                ],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(manifest_path.read_text(encoding="utf-8"))
+
     def run_validator(self, payload: dict, *args: str) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "payload.json"
@@ -565,6 +586,8 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             self.assertEqual([task["key"] for task in manifest["tasks"]], ["author-bounded-contract", "gate-review"])
             self.assertEqual(manifest["tasks"][1]["assignee"], "Dolores")
             self.assertEqual(manifest["tasks"][1]["reviewMode"], "gate_review")
+            self.assertEqual(manifest["contractGuide"]["planOperations"], ["add", "modify", "remove"])
+            self.assertEqual(manifest["tasks"][0]["contract"]["plan"]["operation"], "modify")
             self.assertEqual(
                 set(manifest["tasks"][0]["contract"]["plan"]),
                 {
@@ -579,6 +602,26 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                     "completionChecks",
                 },
             )
+
+    def test_manifest_bootstrap_exposes_all_unassigned_objective_requirements(self) -> None:
+        objective = {
+            "id": str(uuid.uuid4()),
+            "decompositionContract": {
+                "approvedSlices": ["Implement", "Prove"],
+                "requiredOwnershipPaths": ["apps/mission-control/src/lib/example.ts"],
+                "proofExpected": ["Example remains correct"],
+                "requiredProductionEvidence": ["final_integration_proof"],
+            },
+        }
+        manifest = self._initialize_manifest(objective)
+        self.assertEqual(
+            manifest["contractGuide"]["unassignedRequirements"],
+            ["ownership:apps/mission-control/src/lib/example.ts", "proof:0"],
+        )
+        self.assertEqual(
+            manifest["contractGuide"]["requiredProductionEvidence"],
+            ["final_integration_proof"],
+        )
 
     def test_manifest_bootstrap_rejects_objective_without_approved_slices(self) -> None:
         objective = {
