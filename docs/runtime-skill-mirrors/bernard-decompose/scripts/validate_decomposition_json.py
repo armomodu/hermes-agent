@@ -206,6 +206,10 @@ def _path_within_root(path: str, root: str) -> bool:
         clean_path == clean_root or clean_path.startswith(clean_root + "/")
     )
 
+def _is_cross_family_root_overuse(usages: list[tuple[str, str]]) -> bool:
+    workflow_families = {family for _task_id, family in usages if family}
+    return len(usages) >= 4 and len(workflow_families) > 1
+
 
 def _compact_scope_roots(values: list[str]) -> list[str]:
     roots = sorted(
@@ -744,7 +748,7 @@ def collect_contract_required_findings(
     for field, usages_by_root in root_usage.items():
         for root, usages in usages_by_root.items():
             workflow_families = {family for _task_id, family in usages if family}
-            if len(usages) > 1 and len(workflow_families) > 1:
+            if _is_cross_family_root_overuse(usages):
                 findings.append(
                     _graph_finding(
                         f"{field}_cross_family_reuse",

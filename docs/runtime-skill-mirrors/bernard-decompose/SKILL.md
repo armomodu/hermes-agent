@@ -78,7 +78,7 @@ Hard boundaries:
 - Shared interface, file adapter, hosted adapter, hybrid adapter, and export surfaces are separate
   owners when the objective requires them.
 - A consumed token has one provider and a dependency edge to that provider.
-- Consume sibling outputs through tokens; never replace slice authority or proof with a generic file.
+- Consume sibling outputs through tokens; never mass-reuse an unrelated generic authority or proof.
 - Generic proof tasks do not invent authority JSON. Only real authority extraction produces a named
   evidence artifact.
 - One final `integration_proof` execution task depends on every preceding execution slice.

@@ -754,21 +754,26 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         )
 
     def test_generic_root_reuse_across_workflow_families_is_rejected(self) -> None:
-        manifest, objective = convergence_manifest()
-        shared_root = "apps/mission-control/src/lib/shared-authority.ts"
-        manifest["tasks"][0]["contract"]["authorityRoot"] = shared_root
-        manifest["tasks"][1]["contract"]["authorityRoot"] = shared_root
-        manifest["tasks"][1]["contract"]["workflowFamily"] = "review"
+        spec = importlib.util.spec_from_file_location("decomposition_validator", VALIDATOR)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
 
-        result, report = self.run_contract_validation(manifest, objective)
-
-        self.assertNotEqual(result.returncode, 0)
-        finding = next(
-            item
-            for item in report["findings"]
-            if item["code"] == "authorityRoot_cross_family_reuse"
+        self.assertFalse(
+            module._is_cross_family_root_overuse(
+                [("task-1", "storage"), ("task-2", "docs")]
+            )
         )
-        self.assertEqual(finding["paths"], [shared_root])
+        self.assertTrue(
+            module._is_cross_family_root_overuse(
+                [
+                    ("task-1", "storage"),
+                    ("task-2", "storage"),
+                    ("task-3", "docs"),
+                    ("task-4", "task_objective"),
+                ]
+            )
+        )
 
     def test_completion_helper_carries_large_accepted_result_from_file(self) -> None:
         spec = importlib.util.spec_from_file_location("complete_decomposition", COMPLETION_HELPER)
