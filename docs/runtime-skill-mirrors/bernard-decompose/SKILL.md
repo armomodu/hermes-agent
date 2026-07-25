@@ -78,11 +78,11 @@ Hard boundaries:
 - Shared interface, file adapter, hosted adapter, hybrid adapter, and export surfaces are separate
   owners when the objective requires them.
 - A consumed token has one provider and a dependency edge to that provider.
+- Consume sibling outputs through tokens; never replace slice authority or proof with a generic file.
 - Generic proof tasks do not invent authority JSON. Only real authority extraction produces a named
   evidence artifact.
 - One final `integration_proof` execution task depends on every preceding execution slice.
 - One final read-only `gate_review` depends on the integration proof and all required execution work.
-
 Start from `requiredOwnershipPaths`. Assign each requirement to its one actual writable owner.
 Do not hide existing ownership behind a parent `/**` glob.
 ### Production Delivery Profiles

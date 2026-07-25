@@ -739,6 +739,37 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertEqual(finding["requirementId"], "requiredOwnershipPaths[0]")
         self.assertEqual(finding["paths"][0], implementation_path)
 
+    def test_sibling_output_cannot_be_reused_as_generic_artifact_authority(self) -> None:
+        manifest, objective = convergence_manifest()
+        implementation_output = manifest["tasks"][0]["contract"]["mutationRoot"]
+        manifest["tasks"][0]["contract"]["outputArtifacts"] = [implementation_output]
+        manifest["tasks"][1]["contract"]["authorityRoot"] = implementation_output
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "generic_proof_artifact_reused",
+            {finding["code"] for finding in report["findings"]},
+        )
+
+    def test_generic_root_reuse_across_workflow_families_is_rejected(self) -> None:
+        manifest, objective = convergence_manifest()
+        shared_root = "apps/mission-control/src/lib/shared-authority.ts"
+        manifest["tasks"][0]["contract"]["authorityRoot"] = shared_root
+        manifest["tasks"][1]["contract"]["authorityRoot"] = shared_root
+        manifest["tasks"][1]["contract"]["workflowFamily"] = "review"
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertNotEqual(result.returncode, 0)
+        finding = next(
+            item
+            for item in report["findings"]
+            if item["code"] == "authorityRoot_cross_family_reuse"
+        )
+        self.assertEqual(finding["paths"], [shared_root])
+
     def test_completion_helper_carries_large_accepted_result_from_file(self) -> None:
         spec = importlib.util.spec_from_file_location("complete_decomposition", COMPLETION_HELPER)
         module = importlib.util.module_from_spec(spec)

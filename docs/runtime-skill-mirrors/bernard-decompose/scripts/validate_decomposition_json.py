@@ -710,6 +710,11 @@ def collect_contract_required_findings(
     task_id_set = {task_id for task_id in task_ids if task_id}
     seen_ids: set[str] = set()
     providers: dict[str, list[str]] = {}
+    output_artifact_owners: dict[str, list[str]] = {}
+    root_usage: dict[str, dict[str, list[tuple[str, str]]]] = {
+        "authorityRoot": {},
+        "proofRoot": {},
+    }
     for task, task_id in zip(valid_tasks, task_ids):
         if not task_id:
             findings.append(_graph_finding("task_id_missing", "task", "task id is required"))
@@ -722,9 +727,69 @@ def collect_contract_required_findings(
             findings.append(_graph_finding("task_id_duplicate", "dependency_graph", f"duplicate task id {task_id}", task_id=task_id))
         seen_ids.add(task_id)
         contract = task.get("taskContract")
-        if isinstance(contract, dict) and task.get("taskType") == "execution":
-            for token in normalized_string_list(contract.get("provides")):
-                providers.setdefault(token, []).append(task_id)
+        if isinstance(contract, dict):
+            if task.get("taskType") == "execution":
+                for token in normalized_string_list(contract.get("provides")):
+                    providers.setdefault(token, []).append(task_id)
+            for artifact in normalized_string_list(contract.get("outputArtifacts")):
+                output_artifact_owners.setdefault(artifact, []).append(task_id)
+            workflow_family = str(contract.get("workflowFamily") or "").strip()
+            for field in root_usage:
+                root = str(contract.get(field) or "").strip()
+                if root:
+                    root_usage[field].setdefault(root, []).append(
+                        (task_id, workflow_family)
+                    )
+
+    for field, usages_by_root in root_usage.items():
+        for root, usages in usages_by_root.items():
+            workflow_families = {family for _task_id, family in usages if family}
+            if len(usages) > 1 and len(workflow_families) > 1:
+                findings.append(
+                    _graph_finding(
+                        f"{field}_cross_family_reuse",
+                        "objective_coverage",
+                        (
+                            f"taskContract.{field} is reused across unrelated workflow "
+                            f"families for {root}: {sorted(workflow_families)}"
+                        ),
+                        paths=[root],
+                        dependencies=[task_id for task_id, _family in usages],
+                    )
+                )
+
+    for task, task_id in zip(valid_tasks, task_ids):
+        contract = task.get("taskContract")
+        if not isinstance(contract, dict):
+            continue
+        proof_root = str(contract.get("proofRoot") or "").strip()
+        artifact_paths = [
+            str(contract.get("authorityRoot") or "").strip(),
+            *normalized_string_list(contract.get("readOnlyAnchors")),
+            *normalized_string_list(contract.get("proofFiles")),
+        ]
+        for artifact_path in [path for path in artifact_paths if path]:
+            if proof_root and _path_within_root(artifact_path, proof_root):
+                continue
+            sibling_owners = [
+                owner
+                for owner in output_artifact_owners.get(artifact_path, [])
+                if owner != task_id
+            ]
+            if sibling_owners:
+                findings.append(
+                    _graph_finding(
+                        "generic_proof_artifact_reused",
+                        "dependency_graph",
+                        (
+                            f"task artifact authority reuses a sibling output outside "
+                            f"its proofRoot: {artifact_path}"
+                        ),
+                        task_id=task_id,
+                        paths=[artifact_path],
+                        dependencies=sibling_owners,
+                    )
+                )
 
     objective_contract = (
         payload.get("decompositionContract")
