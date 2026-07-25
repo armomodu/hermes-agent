@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 import uuid
+import importlib.util
 from pathlib import Path
 
 
@@ -16,6 +17,10 @@ VALIDATOR = (
 CONTRACT_BUILDER = (
     REPO_ROOT
     / "docs/runtime-skill-mirrors/bernard-decompose/scripts/build_contract_decomposition.py"
+)
+OBJECTIVE_FETCHER = (
+    REPO_ROOT
+    / "docs/runtime-skill-mirrors/bernard-decompose/scripts/fetch_objective.py"
 )
 CHECKPOINT = (
     REPO_ROOT
@@ -508,6 +513,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertIn("Production Delivery Profiles", skill)
         self.assertIn("productionGateReviewer", skill)
         self.assertIn("--init-manifest objective.json manifest.json", skill)
+        self.assertIn("fetch_objective.py <objective-id> objective.json", skill)
         self.assertIn("within five non-write tool calls", skill)
         self.assertIn("Do not read", skill)
         self.assertIn("implementation source during normal decomposition", skill)
@@ -594,6 +600,44 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("approvedSlices must be a non-empty list", result.stderr)
             self.assertFalse(manifest_path.exists())
+
+    def test_objective_fetcher_uses_bounded_authenticated_interface(self) -> None:
+        objective_id = str(uuid.uuid4())
+        captured: dict[str, object] = {}
+        spec = importlib.util.spec_from_file_location("fetch_objective", OBJECTIVE_FETCHER)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps({"id": objective_id, "decompositionContract": {}}).encode()
+
+        def opener(request, *, timeout: int):
+            captured["url"] = request.full_url
+            captured["authorization"] = request.get_header("Authorization")
+            captured["user_agent"] = request.get_header("User-agent")
+            captured["timeout"] = timeout
+            return Response()
+
+        objective = module.fetch_objective(
+            objective_id,
+            "https://app.maroncorp.com/api/",
+            "test-token",
+            opener=opener,
+        )
+
+        self.assertEqual(objective["id"], objective_id)
+        self.assertEqual(captured["url"], f"https://app.maroncorp.com/api/objectives/{objective_id}")
+        self.assertEqual(captured["authorization"], "Bearer test-token")
+        self.assertEqual(captured["user_agent"], "Hermes-Mission-Control/1.0")
+        self.assertEqual(captured["timeout"], 30)
 
     def test_structured_approved_slice_requirement_is_enforced(self) -> None:
         manifest, objective = convergence_manifest()

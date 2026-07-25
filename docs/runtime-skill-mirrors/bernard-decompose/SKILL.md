@@ -50,7 +50,6 @@ When `decompositionContract.taskContractRequired=true`, every child uses
 `task-contract.v1`. Legacy-only tasks are forbidden.
 
 Each execution task declares:
-
 - one exact or creation-bounded `mutationRoot`;
 - one narrow `authorityRoot`;
 - one exact `proofRoot`;
@@ -61,7 +60,6 @@ Each execution task declares:
 - expected symbols/invariants and executable completion checks.
 
 Hard boundaries:
-
 - One task owns one independently mutable production root.
 - Exact existing files are enumerated. A recursive writable glob is only for genuinely new files.
 - Normal implementation tasks do not write proof files and use `proofFiles=[]`.
@@ -88,7 +86,6 @@ Hard boundaries:
 Start from `requiredOwnershipPaths`. Every listed path must have exactly one explicit writable owner.
 Do not hide existing ownership behind a parent `/**` glob.
 ### Production Delivery Profiles
-
 For `production_component` or `production_release`, give every `requiredProductionEvidence`
 category an exact proof owner with
 `productionEvidence=[{"category":"...","evidenceToken":"..."}]`, the same token in `provides`, and
@@ -100,13 +97,17 @@ semantic slices, the validator checks mechanics, and Mission Control remains fin
 ## Canonical Manifest Workflow
 Use this workflow for every contract-required graph:
 
-1. Run `decomposition_checkpoint.py resume`. Reuse its manifest when present. Otherwise, immediately
-   create the canonical skeleton before exploring source:
+1. Fetch the governed objective through the bounded helper, then resume its checkpoint:
+```bash
+python3 scripts/fetch_objective.py <objective-id> objective.json
+python3 scripts/decomposition_checkpoint.py resume
+```
+   Reuse the checkpoint manifest when present. Otherwise immediately create the canonical skeleton:
 ```bash
 python3 scripts/build_contract_decomposition.py \
   --init-manifest objective.json manifest.json
 ```
-   The manifest must exist within five non-write tool calls after reading the objective. Do not read
+   The manifest must exist within five non-write tool calls after fetching the objective. Do not read
    builder, validator, checkpoint, or submitter implementation source during normal decomposition;
    their documented CLI and validator report are the complete operational interface. If bootstrap
    fails, block with its error instead of reverse-engineering the tools.
