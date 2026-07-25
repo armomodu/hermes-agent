@@ -83,7 +83,7 @@ Hard boundaries:
 - One final `integration_proof` execution task depends on every preceding execution slice.
 - One final read-only `gate_review` depends on the integration proof and all required execution work.
 
-Start from `requiredOwnershipPaths`. Every listed path must have exactly one explicit writable owner.
+Start from `requiredOwnershipPaths`. Assign each requirement to its one actual writable owner.
 Do not hide existing ownership behind a parent `/**` glob.
 ### Production Delivery Profiles
 For `production_component` or `production_release`, give every `requiredProductionEvidence`
@@ -185,8 +185,8 @@ objective before deciding whether submission may be retried.
 python3 scripts/decomposition_checkpoint.py mark accepted
 ```
 
-13. Complete only after `checkpointStatus="accepted"`, passing the exact validated
-    `decomposition.json` as the result. The guard rejects other results; acceptance archives artifacts.
+13. Complete only after `checkpointStatus="accepted"` with
+    `python3 scripts/complete_decomposition.py`; it verifies the checkpoint and exact result first.
 14. Report convergence metrics:
 ```bash
 python3 scripts/decomposition_checkpoint.py metrics

@@ -1339,6 +1339,7 @@ def collect_contract_required_findings(
                         }
                     )
                     assignments: dict[str, list[str]] = {}
+                    manifest_task_ids: dict[str, str] = {}
                     try:
                         namespace = uuid.UUID(objective_id)
                     except Exception:
@@ -1373,6 +1374,7 @@ def collect_contract_required_findings(
                                         task_id=expected_id,
                                     )
                                 )
+                            manifest_task_ids[key] = expected_id
                         requirements = manifest_task.get("requirements")
                         if not isinstance(requirements, list):
                             findings.append(
@@ -1397,6 +1399,47 @@ def collect_contract_required_findings(
                                     dependencies=owners,
                                 )
                             )
+                        elif requirement_id.startswith("ownership:"):
+                            required_path = requirement_id.removeprefix("ownership:")
+                            owner_key = owners[0]
+                            owner_id = manifest_task_ids.get(owner_key)
+                            owner_task = next(
+                                (
+                                    task
+                                    for task in valid_tasks
+                                    if str(task.get("id") or "").strip() == owner_id
+                                ),
+                                None,
+                            )
+                            owner_contract = (
+                                owner_task.get("taskContract")
+                                if isinstance(owner_task, dict)
+                                else None
+                            )
+                            writable_scope = (
+                                normalized_string_list(owner_contract.get("writableFiles"))
+                                + normalized_string_list(owner_contract.get("createdFileGlobs"))
+                                if isinstance(owner_contract, dict)
+                                else []
+                            )
+                            if not any(
+                                _path_within_root(required_path, scope_path)
+                                for scope_path in writable_scope
+                            ):
+                                findings.append(
+                                    _graph_finding(
+                                        "objective_requirement_owner_scope_mismatch",
+                                        "objective_coverage",
+                                        (
+                                            f"objective requirement {requirement_id} must be assigned "
+                                            f"to a task that can write that path; task={owner_key}"
+                                        ),
+                                        task_id=owner_id,
+                                        requirement_id=source_id,
+                                        paths=[required_path, *writable_scope],
+                                        dependencies=[owner_key],
+                                    )
+                                )
                     for requirement_id, owners in assignments.items():
                         if requirement_id not in expected_requirements:
                             findings.append(

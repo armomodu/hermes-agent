@@ -26,6 +26,10 @@ CHECKPOINT = (
     REPO_ROOT
     / "docs/runtime-skill-mirrors/bernard-decompose/scripts/decomposition_checkpoint.py"
 )
+COMPLETION_HELPER = (
+    REPO_ROOT
+    / "docs/runtime-skill-mirrors/bernard-decompose/scripts/complete_decomposition.py"
+)
 AUTHORITY_IMPACT_COLLECTOR = (
     REPO_ROOT
     / "docs/runtime-skill-mirrors/bernard-decompose/scripts/collect_authority_impact.py"
@@ -529,7 +533,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertIn("decomposition_checkpoint.py resume", skill)
         self.assertIn("Never change a key during correction", skill)
         self.assertIn("read the complete report once", skill)
-        self.assertIn("Every listed path must have exactly one explicit writable owner", skill)
+        self.assertIn("Assign each requirement to its one actual writable owner", skill)
         self.assertIn("One final `integration_proof`", skill)
         self.assertIn("Production Delivery Profiles", skill)
         self.assertIn("productionGateReviewer", skill)
@@ -538,6 +542,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertIn("within five non-write tool calls", skill)
         self.assertIn("Do not read", skill)
         self.assertIn("implementation source during normal decomposition", skill)
+        self.assertIn("complete_decomposition.py", skill)
 
     def test_manifest_bootstrap_is_deterministic_and_slice_complete(self) -> None:
         objective = {
@@ -715,6 +720,91 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             if item["code"] == "objective_requirement_coverage_invalid"
         )
         self.assertEqual(finding["requirementId"], "approvedSlices[0]")
+
+    def test_ownership_requirement_must_match_owner_writable_scope(self) -> None:
+        manifest, objective = convergence_manifest()
+        implementation_path = objective["decompositionContract"]["requiredOwnershipPaths"][0]
+        requirement = f"ownership:{implementation_path}"
+        manifest["tasks"][0]["requirements"].remove(requirement)
+        manifest["tasks"][1]["requirements"].append(requirement)
+
+        result, report = self.run_contract_validation(manifest, objective)
+
+        self.assertNotEqual(result.returncode, 0)
+        finding = next(
+            item
+            for item in report["findings"]
+            if item["code"] == "objective_requirement_owner_scope_mismatch"
+        )
+        self.assertEqual(finding["requirementId"], "requiredOwnershipPaths[0]")
+        self.assertEqual(finding["paths"][0], implementation_path)
+
+    def test_completion_helper_carries_large_accepted_result_from_file(self) -> None:
+        spec = importlib.util.spec_from_file_location("complete_decomposition", COMPLETION_HELPER)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+        objective_id = str(uuid.uuid4())
+        result = {
+            "kind": "decomposition_result",
+            "objectiveId": objective_id,
+            "statusNote": "Validator-clean graph",
+            "tasks": [{"id": str(uuid.uuid4()), "detail": "x" * 120_000}],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            result_path = root / "decomposition.json"
+            checkpoint_path = root / ".mc-decomposition-checkpoint.json"
+            result_path.write_text(json.dumps(result), encoding="utf-8")
+            checkpoint_path.write_text(
+                json.dumps(
+                    {
+                        "checkpointStatus": "accepted",
+                        "objectiveId": objective_id,
+                        "decompositionPath": str(result_path),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            loaded, compact = module.load_accepted_result(checkpoint_path, result_path)
+            command = module.build_completion_command("t_large", compact, loaded)
+
+        self.assertEqual(command[:4], ["hermes", "kanban", "complete", "t_large"])
+        self.assertGreater(len(command[command.index("--result") + 1]), 100_000)
+
+    def test_completion_helper_rejects_unaccepted_checkpoint(self) -> None:
+        spec = importlib.util.spec_from_file_location("complete_decomposition", COMPLETION_HELPER)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            result_path = root / "decomposition.json"
+            checkpoint_path = root / ".mc-decomposition-checkpoint.json"
+            result_path.write_text(
+                json.dumps(
+                    {
+                        "kind": "decomposition_result",
+                        "objectiveId": "objective",
+                        "tasks": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            checkpoint_path.write_text(
+                json.dumps(
+                    {
+                        "checkpointStatus": "validator_clean",
+                        "objectiveId": "objective",
+                        "decompositionPath": str(result_path),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "must be accepted"):
+                module.load_accepted_result(checkpoint_path, result_path)
 
     def test_legacy_string_approved_slice_remains_supported(self) -> None:
         manifest, objective = convergence_manifest()
