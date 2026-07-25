@@ -848,7 +848,7 @@ def collect_contract_required_findings(
                     paths=proof_files,
                 )
             )
-        if task.get("assignee") == "William" and not proof_only:
+        if task_type == "execution" and not proof_only:
             leaked_tests = [path for path in writable_files if "/__tests__/" in path]
             leaked_proof_creations = [
                 path for path in created_files if proof_root and _path_within_root(path, proof_root)
@@ -858,7 +858,7 @@ def collect_contract_required_findings(
                     _graph_finding(
                         "implementation_proof_scope_leak",
                         "task",
-                        f"normal William task owns proof scope for {task_id}",
+                        f"normal execution task owns proof scope for {task_id}",
                         task_id=task_id or None,
                         paths=sorted(set(leaked_tests + leaked_proof_creations)),
                     )
@@ -905,18 +905,18 @@ def collect_contract_required_findings(
                 if cluster
             }
         )
-        if task.get("assignee") == "William" and len(clusters) > 1:
+        if task_type == "execution" and len(clusters) > 1:
             findings.append(
                 _graph_finding(
                     "multiple_mutation_clusters",
                     "task",
-                    f"William writable scope spans multiple production clusters for {task_id}: {clusters}",
+                    f"execution writable scope spans multiple production clusters for {task_id}: {clusters}",
                     task_id=task_id or None,
                     paths=writable_files,
                 )
             )
         if (
-            task.get("assignee") == "William"
+            task_type == "execution"
             and len(clusters) <= 1
             and len(objective_scope_clusters) > 1
         ):
@@ -935,7 +935,7 @@ def collect_contract_required_findings(
                     _graph_finding(
                         "multiple_mutation_clusters",
                         "task",
-                        f"William writable scope spans multiple objective clusters for {task_id}: {touched_clusters}",
+                        f"execution writable scope spans multiple objective clusters for {task_id}: {touched_clusters}",
                         task_id=task_id or None,
                         paths=touched_clusters,
                     )
@@ -1740,10 +1740,10 @@ def main() -> int:
                         f"authority-extraction task must keep writable scope equal to proof files for {task_id}: "
                         f"writable={writable_files} proof={proof_files}"
                     )
-            elif task.get("assignee") == "William":
+            elif task.get("taskType") == "execution":
                 leaked_tests = [path for path in writable_files if "/__tests__/" in path]
                 if leaked_tests:
-                    return fail(f"William writable scope must not include test globs/files for {task_id}: {leaked_tests}")
+                    return fail(f"execution writable scope must not include test globs/files for {task_id}: {leaked_tests}")
                 proof_creations = [
                     path
                     for path in normalized_string_list(task_contract.get("createdFileGlobs"))
@@ -1751,7 +1751,7 @@ def main() -> int:
                 ]
                 if contract_required and proof_creations:
                     return fail(
-                        f"normal William task must not create proof files; split proof ownership for {task_id}: "
+                        f"normal execution task must not create proof files; split proof ownership for {task_id}: "
                         f"{proof_creations}"
                     )
 
@@ -1860,7 +1860,7 @@ def main() -> int:
                         f"exact-parity contract projection has untraceable projected members for {task_id}: {untraceable}"
                     )
 
-            if task.get("assignee") == "William":
+            if task.get("taskType") == "execution":
                 clusters = sorted(
                     {
                         cluster
@@ -1870,7 +1870,7 @@ def main() -> int:
                 )
                 if len(clusters) > 1:
                     return fail(
-                        f"William writable scope spans multiple production clusters for {task_id}: {clusters}"
+                        f"execution writable scope spans multiple production clusters for {task_id}: {clusters}"
                     )
 
                 if (

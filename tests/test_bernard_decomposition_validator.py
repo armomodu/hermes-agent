@@ -1444,6 +1444,20 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("task_assignee_incompatible", result.stderr)
 
+    def test_non_william_execution_task_cannot_bypass_multi_root_scope(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][0]["assignee"] = "Codex"
+        payload["tasks"][0]["taskContract"]["mutationRoot"] = "apps/mission-control/src/lib"
+        payload["tasks"][0]["taskContract"]["writableFiles"] = [
+            "apps/mission-control/src/lib/knowledge-plane/contracts/release.ts",
+            "apps/mission-control/src/lib/storage/types.ts",
+        ]
+
+        result = self.run_validator(payload, "--contract-required")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("multiple_mutation_clusters", result.stderr)
+
     def test_production_contract_requires_evidence_coverage_and_independent_gate(self) -> None:
         payload = contract_required_payload()
         objective = {
