@@ -127,6 +127,25 @@ def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
             "focusedTests": require_string_list(verification.get("focusedTests", []), "contract.verification.focusedTests", key),
             "qualityGates": require_string_list(verification.get("qualityGates", []), "contract.verification.qualityGates", key),
         }
+        production_evidence = contract_input.get("productionEvidence", [])
+        if not isinstance(production_evidence, list):
+            raise ValueError(f"contract.productionEvidence must be a list for {key}")
+        contract["productionEvidence"] = []
+        for index, declaration in enumerate(production_evidence):
+            if not isinstance(declaration, dict):
+                raise ValueError(f"contract.productionEvidence[{index}] must be an object for {key}")
+            contract["productionEvidence"].append({
+                "category": require_text(
+                    declaration.get("category"),
+                    f"contract.productionEvidence[{index}].category",
+                    key,
+                ),
+                "evidenceToken": require_text(
+                    declaration.get("evidenceToken"),
+                    f"contract.productionEvidence[{index}].evidenceToken",
+                    key,
+                ),
+            })
         if "primaryArtifactClass" in contract_input:
             contract["primaryArtifactClass"] = require_text(contract_input["primaryArtifactClass"], "contract.primaryArtifactClass", key)
         execution_plan = contract_input.get("executionPlan")

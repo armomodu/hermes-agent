@@ -47,6 +47,16 @@ SUPPORTED_QUALITY_GATES = {
     "software_build",
 }
 
+PRODUCTION_EVIDENCE_CATEGORIES = {
+    "authentication_authorization",
+    "input_validation_pagination",
+    "persistence_migration",
+    "concurrency_idempotency",
+    "cross_backend_equivalence",
+    "observability_failure_recovery",
+    "final_integration_proof",
+}
+
 AUTHORITY_IMPACT_ROLES = {
     "implementation",
     "export",
@@ -366,6 +376,24 @@ def collect_task_contract_local_findings(
         verification = {}
     focused_tests = normalized_string_list(verification.get("focusedTests"))
     quality_gates = normalized_string_list(verification.get("qualityGates"))
+    production_evidence = task_contract.get("productionEvidence", [])
+    if not isinstance(production_evidence, list):
+        add("production_evidence_invalid", f"taskContract.productionEvidence must be a list for {task_id}")
+        production_evidence = []
+    provides = set(normalized_string_list(task_contract.get("provides")))
+    for declaration in production_evidence:
+        if not isinstance(declaration, dict):
+            add("production_evidence_invalid", f"production evidence declaration must be an object for {task_id}")
+            continue
+        category = str(declaration.get("category") or "").strip()
+        token = str(declaration.get("evidenceToken") or "").strip()
+        if category not in PRODUCTION_EVIDENCE_CATEGORIES:
+            add("production_evidence_category_invalid", f"unknown production evidence category for {task_id}: {category}")
+        if not token or token not in provides:
+            add(
+                "production_evidence_token_invalid",
+                f"production evidence token must be declared in provides for {task_id}: {token}",
+            )
     for quality_gate in quality_gates:
         if quality_gate not in SUPPORTED_QUALITY_GATES:
             add(
@@ -959,6 +987,40 @@ def collect_contract_required_findings(
                     f"gate_review missing execution dependencies: {missing_gate_dependencies}",
                     task_id=str(gate.get("id") or "") or None,
                     dependencies=missing_gate_dependencies,
+                )
+            )
+    required_production_evidence = set(
+        normalized_string_list(objective_contract.get("requiredProductionEvidence"))
+    )
+    if required_production_evidence:
+        evidence_owners: dict[str, list[str]] = {}
+        for task, task_id in zip(valid_tasks, task_ids):
+            contract = task.get("taskContract")
+            if not isinstance(contract, dict):
+                continue
+            for declaration in contract.get("productionEvidence", []):
+                if isinstance(declaration, dict):
+                    category = str(declaration.get("category") or "").strip()
+                    if category:
+                        evidence_owners.setdefault(category, []).append(task_id)
+        for category in sorted(required_production_evidence):
+            if not evidence_owners.get(category):
+                findings.append(
+                    _graph_finding(
+                        "production_evidence_missing",
+                        "objective_coverage",
+                        f"required production evidence has no owner: {category}",
+                        requirement_id=f"productionEvidence:{category}",
+                    )
+                )
+        expected_reviewer = str(objective_contract.get("productionGateReviewer") or "Dolores")
+        if gate and gate.get("assignee") != expected_reviewer:
+            findings.append(
+                _graph_finding(
+                    "production_gate_reviewer_invalid",
+                    "objective_coverage",
+                    f"production gate must be assigned to {expected_reviewer}",
+                    task_id=str(gate.get("id") or "") or None,
                 )
             )
     integration_tasks = [

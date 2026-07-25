@@ -37,11 +37,8 @@ files as authority when the live objective provides a contract.
 
 ### Authority Impact
 
-Before shaping tasks for a changed shared interface:
-
-1. Write `authority-impact-request.json` with the changed authority path, exported symbols, and
-   `changeKind="shared_interface"`.
-2. Collect source-reference candidates:
+For a changed shared interface, write `authority-impact-request.json` with its path, exported
+symbols, and `changeKind="shared_interface"`, then collect candidates:
 
 ```bash
 python3 scripts/collect_authority_impact.py \
@@ -50,19 +47,11 @@ python3 scripts/collect_authority_impact.py \
   --output authority-impact.json
 ```
 
-3. Inspect the candidates and confirm only semantically required implementation, export,
-   composition, persistence, API, and integration-proof roots.
-4. Copy the collector result into manifest `authorityImpact`, add exact `confirmedRoots` with one
-   supported role each, and add every confirmed path to `requiredOwnershipPaths`.
-5. Assign each confirmed path to exactly one task. Search candidates are evidence, not automatic
-   tasks.
-
-For a shared interface, at least one confirmed composition or export root is mandatory. Never infer
-impact from prose alone or omit a confirmed root because another task owns the interface definition.
-Each composition or export owner must use the changed interface path as its primary `authorityRoot`.
-Do not require a full build on the interface producer or a partial consumer while confirmed sibling
-owners are still pending. Put `software_build` on the first convergence slice that depends on every
-confirmed composition/export owner, and always on the final `integration_proof`.
+Confirm only necessary implementation/export/composition/persistence/API/integration roots, record
+them in manifest `authorityImpact.confirmedRoots` and `requiredOwnershipPaths`, and give each one
+owner. Search candidates are evidence, not automatic tasks. A shared interface requires a confirmed
+composition/export owner using that interface as `authorityRoot`; run `software_build` only after
+all confirmed owners converge and on the final integration proof.
 ## Contract-Required Decomposition
 
 When `decompositionContract.taskContractRequired=true`, every child uses
@@ -106,6 +95,15 @@ Hard boundaries:
 
 Start from `requiredOwnershipPaths`. Every listed path must have exactly one explicit writable owner.
 Do not hide existing ownership behind a parent `/**` glob.
+### Production Delivery Profiles
+
+For `production_component` or `production_release`, give every `requiredProductionEvidence`
+category an exact proof owner with
+`productionEvidence=[{"category":"...","evidenceToken":"..."}]`, the same token in `provides`, and
+an executable existing quality gate. The integration task provides `final_integration_proof`; assign
+the final gate to `productionGateReviewer` (normally Dolores), never William or Bernard.
+`production_component` excludes cloud load/network/backup/restore/DR certification. Bernard selects
+semantic slices, the validator checks mechanics, and Mission Control remains final authority.
 
 ## Canonical Manifest Workflow
 
@@ -213,6 +211,8 @@ Before expansion, verify:
 - evidence providers precede consumers;
 - final integration proof consumes all required outputs;
 - gate review is last and read-only;
+- every required production evidence category has a token-bearing proof owner;
+- the production gate is assigned to the objective's independent reviewer;
 - task count is within the live cap.
 
 ## Task Repair

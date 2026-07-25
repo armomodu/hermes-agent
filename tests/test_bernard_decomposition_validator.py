@@ -505,6 +505,8 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertIn("read the complete report once", skill)
         self.assertIn("Every listed path must have exactly one explicit writable owner", skill)
         self.assertIn("One final `integration_proof`", skill)
+        self.assertIn("Production Delivery Profiles", skill)
+        self.assertIn("productionGateReviewer", skill)
 
     def test_authority_impact_collector_finds_reference_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1386,6 +1388,83 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
     def test_contract_required_accepts_bounded_proof_integration_and_read_only_gate(self) -> None:
         result = self.run_validator(contract_required_payload(), "--contract-required")
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_contract_requires_evidence_coverage_and_independent_gate(self) -> None:
+        payload = contract_required_payload()
+        objective = {
+            "id": str(uuid.uuid4()),
+            "decompositionContract": {
+                "version": "objective-decomposition.v1",
+                "mode": "payload_only",
+                "taskContractRequired": True,
+                "scopeBoundary": "Production control",
+                "outOfScope": ["Cloud infrastructure certification"],
+                "allowedExpansionZone": ["apps/mission-control/**"],
+                "touchedSurfaces": ["Production component"],
+                "sourceAnchors": ["apps/mission-control/src/lib/storage/types.ts"],
+                "proofExpected": ["Production proof"],
+                "maxTaskCount": 8,
+                "requiredProductionEvidence": [
+                    "authentication_authorization",
+                    "final_integration_proof",
+                ],
+                "productionGateReviewer": "Dolores",
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload_path = Path(temp_dir) / "payload.json"
+            objective_path = Path(temp_dir) / "objective.json"
+            payload_path.write_text(json.dumps(payload), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            missing = subprocess.run(
+                [
+                    "python3",
+                    str(VALIDATOR),
+                    "--contract-required",
+                    str(payload_path),
+                    "8",
+                    "--objective",
+                    str(objective_path),
+                ],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("production_evidence_missing", missing.stderr)
+
+            auth_contract = payload["tasks"][1]["taskContract"]
+            auth_contract["productionEvidence"] = [{
+                "category": "authentication_authorization",
+                "evidenceToken": "auth-proof-v1",
+            }]
+            auth_contract["provides"].append("auth-proof-v1")
+            integration_contract = payload["tasks"][2]["taskContract"]
+            integration_contract["productionEvidence"] = [{
+                "category": "final_integration_proof",
+                "evidenceToken": "integration-proof-v1",
+            }]
+            integration_contract["provides"].append("integration-proof-v1")
+            payload["tasks"][3]["assignee"] = "Dolores"
+            payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            valid = subprocess.run(
+                [
+                    "python3",
+                    str(VALIDATOR),
+                    "--contract-required",
+                    str(payload_path),
+                    "8",
+                    "--objective",
+                    str(objective_path),
+                ],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(valid.returncode, 0, valid.stderr)
 
     def test_contract_required_rejects_proof_creation_in_normal_slice(self) -> None:
         payload = contract_required_payload()
