@@ -57,6 +57,11 @@ PRODUCTION_EVIDENCE_CATEGORIES = {
     "final_integration_proof",
 }
 
+TASK_TYPE_ALLOWED_ASSIGNEES = {
+    "execution": {"William", "Codex", "Librarian"},
+    "review": {"Bernard", "Maeve", "Dolores", "Abdul"},
+}
+
 AUTHORITY_IMPACT_ROLES = {
     "implementation",
     "export",
@@ -760,6 +765,19 @@ def collect_contract_required_findings(
             review_tasks.append(task)
         elif task_id:
             execution_ids.add(task_id)
+        assignee = task.get("assignee")
+        if (
+            task_type in TASK_TYPE_ALLOWED_ASSIGNEES
+            and assignee not in TASK_TYPE_ALLOWED_ASSIGNEES[task_type]
+        ):
+            findings.append(
+                _graph_finding(
+                    "task_assignee_incompatible",
+                    "task",
+                    f"assignee {assignee!r} cannot perform taskType {task_type!r} for {task_id}",
+                    task_id=task_id or None,
+                )
+            )
         if task.get("priority") not in ("P1", "P2", "P3"):
             findings.append(
                 _graph_finding(

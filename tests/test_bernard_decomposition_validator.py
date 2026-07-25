@@ -1435,6 +1435,15 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(contract_required_payload(), "--contract-required")
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_execution_task_rejects_review_only_assignee(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][0]["assignee"] = "Bernard"
+
+        result = self.run_validator(payload, "--contract-required")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("task_assignee_incompatible", result.stderr)
+
     def test_production_contract_requires_evidence_coverage_and_independent_gate(self) -> None:
         payload = contract_required_payload()
         objective = {
