@@ -221,9 +221,14 @@ def run_oneshot(
             real_stdout.write("\n")
         real_stdout.flush()
 
+    if (
+        os.environ.get("HERMES_KANBAN_TASK")
+        and (result.get("failed") or result.get("partial"))
+        and _is_rate_limited_failure(result, response or "")
+    ):
+        return KANBAN_RATE_LIMIT_EXIT_CODE
+
     if os.environ.get("HERMES_KANBAN_TASK") and result.get("failed"):
-        if _is_rate_limited_failure(result, response or ""):
-            return KANBAN_RATE_LIMIT_EXIT_CODE
         return 1
 
     if (result.get("failed") or result.get("partial")) and not (response or "").strip():

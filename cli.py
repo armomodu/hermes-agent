@@ -15906,18 +15906,25 @@ def main(
                         # permanently block the card. Non-kanban runs keep the
                         # plain 0/1 contract automation wrappers expect.
                         _exit_code = 0
-                        if isinstance(result, dict) and result.get("failed"):
-                            _exit_code = 1
-                            if os.environ.get("HERMES_KANBAN_TASK") and result.get(
-                                "failure_reason"
-                            ) in ("rate_limit", "billing"):
+                        if isinstance(result, dict):
+                            if (
+                                os.environ.get("HERMES_KANBAN_TASK")
+                                and (result.get("failed") or result.get("partial"))
+                            ):
                                 try:
                                     from hermes_cli.kanban_db import (
                                         KANBAN_RATE_LIMIT_EXIT_CODE as _RL_CODE,
                                     )
-                                    _exit_code = _RL_CODE
+                                    from hermes_cli.oneshot import (
+                                        _is_rate_limited_failure,
+                                    )
+
+                                    if _is_rate_limited_failure(result, response):
+                                        _exit_code = _RL_CODE
                                 except Exception:
-                                    _exit_code = 1
+                                    pass
+                            if result.get("failed") and _exit_code == 0:
+                                _exit_code = 1
                         sys.exit(_exit_code)
 
                 # Exit with error code if credentials or agent init fails

@@ -37,3 +37,16 @@ Or set the env var: `HERMES_KANBAN_DISPATCH_IN_GATEWAY=false`
 
 Non-dispatch gateways still deliver messages for their own platform adapters
 (Telegram, Discord, etc.) — they just don't poll kanban boards.
+
+## Provider quota backpressure
+
+Kanban workers that exhaust a provider rate or usage limit exit with the
+dedicated temporary-failure code `75`. The dispatch owner returns the card to
+`ready`, records a `rate_limited` event, and applies the configured cooldown
+without incrementing the worker failure counter.
+
+This applies when the provider reports either a terminal failure or a partial
+result carrying authoritative rate-limit evidence. A worker must not be
+classified as a clean-exit protocol violation merely because the provider
+returned quota text in a partial response. Non-rate-limited partial responses
+retain their existing exit behavior.

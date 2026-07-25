@@ -200,18 +200,13 @@ def test_human_single_query_main_finalizes_after_query(monkeypatch):
     ]
 
 
-def test_quiet_single_query_main_finalizes_while_preserving_exit_code(monkeypatch):
+def _run_quiet_single_query(monkeypatch, result, *, kanban=False):
     calls = []
-
     import cli as cli_mod
 
     def run_conversation(*, user_message, conversation_history):
         calls.append(("run", user_message, conversation_history))
-        return {
-            "final_response": "",
-            "error": "provider failed",
-            "failed": True,
-        }
+        return result
 
     class FakeCLI:
         def __init__(self, **_kwargs):
@@ -235,11 +230,9 @@ def test_quiet_single_query_main_finalizes_while_preserving_exit_code(monkeypatc
             return True
 
         def _ensure_runtime_credentials(self):
-            calls.append("credentials")
             return True
 
         def _resolve_turn_agent_config(self, effective_query):
-            calls.append(("resolve", effective_query))
             return {
                 "signature": "same-route",
                 "model": None,
@@ -248,10 +241,12 @@ def test_quiet_single_query_main_finalizes_while_preserving_exit_code(monkeypatc
             }
 
         def _init_agent(self, **kwargs):
-            calls.append(("init", kwargs))
             return True
 
-    monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
+    if kanban:
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "t_demo")
+    else:
+        monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
     monkeypatch.delenv("HERMES_KANBAN_GOAL_MODE", raising=False)
     monkeypatch.setattr(cli_mod, "HermesCLI", FakeCLI)
     monkeypatch.setattr(cli_mod.atexit, "register", lambda *_args, **_kwargs: None)
@@ -264,7 +259,59 @@ def test_quiet_single_query_main_finalizes_while_preserving_exit_code(monkeypatc
     with pytest.raises(SystemExit) as exc_info:
         cli_mod.main(query="hello", quiet=True, toolsets="terminal")
 
-    assert exc_info.value.code == 1
+    return exc_info.value.code, calls
+
+
+def test_quiet_single_query_main_finalizes_while_preserving_exit_code(monkeypatch):
+    exit_code, calls = _run_quiet_single_query(
+        monkeypatch,
+        {
+            "final_response": "",
+            "error": "provider failed",
+            "failed": True,
+        },
+    )
+
+    assert exit_code == 1
     assert ("claim", "cli", True) in calls
     assert ("run", "hello", []) in calls
     assert calls[-1] == ("finalize", "quiet-session")
+
+
+def test_quiet_kanban_partial_usage_limit_returns_rate_limit_exit(monkeypatch):
+    from hermes_cli.kanban_db import KANBAN_RATE_LIMIT_EXIT_CODE
+
+    exit_code, calls = _run_quiet_single_query(
+        monkeypatch,
+        {
+            "final_response": (
+                "API call failed after 3 retries: HTTP 429: "
+                "You have reached your session usage limit"
+            ),
+            "failed": False,
+            "partial": True,
+            "turn_exit_reason": "all_retries_exhausted_no_response",
+            "api_error_context": {
+                "reason": "usage_limit_reached",
+                "message": "You have reached your session usage limit",
+            },
+        },
+        kanban=True,
+    )
+
+    assert exit_code == KANBAN_RATE_LIMIT_EXIT_CODE
+    assert ("run", "hello", []) in calls
+
+
+def test_quiet_kanban_non_rate_limited_partial_keeps_existing_exit(monkeypatch):
+    exit_code, _calls = _run_quiet_single_query(
+        monkeypatch,
+        {
+            "final_response": "Partial response retained for operator inspection",
+            "failed": False,
+            "partial": True,
+        },
+        kanban=True,
+    )
+
+    assert exit_code == 0
