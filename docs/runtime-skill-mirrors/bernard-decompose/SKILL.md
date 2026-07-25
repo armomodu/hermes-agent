@@ -13,16 +13,12 @@ trigger_conditions:
 # Bernard Decomposition
 
 ## Outcome
-
 Return one locally validated structured result:
-
 - `decomposition_result` for an objective decomposition; or
 - `task_repair_result` for a task-level contract repair.
-
 Do not execute implementation work, approve the objective, activate it, or release William.
 
 ## Authority-First Method
-
 1. Read the live Mission Control objective or repair card.
 2. Inventory objective requirements, required ownership paths, and live authority roots.
 3. Assign each requirement exactly once before designing task prose.
@@ -31,12 +27,10 @@ Do not execute implementation work, approve the objective, activate it, or relea
 6. Put the final integration proof and gate review last.
 7. Use the existing Python validator for mechanical feedback.
 8. Treat Mission Control's compiler/linter response as final authority.
-
 Do not encode objective-specific policy in this skill. Do not use prior graphs, memory, or nearby
 files as authority when the live objective provides a contract.
 
 ### Authority Impact
-
 For a changed shared interface, write `authority-impact-request.json` with its path, exported
 symbols, and `changeKind="shared_interface"`, then collect candidates:
 
@@ -46,14 +40,12 @@ python3 scripts/collect_authority_impact.py \
   --request authority-impact-request.json \
   --output authority-impact.json
 ```
-
 Confirm only necessary implementation/export/composition/persistence/API/integration roots, record
 them in manifest `authorityImpact.confirmedRoots` and `requiredOwnershipPaths`, and give each one
 owner. Search candidates are evidence, not automatic tasks. A shared interface requires a confirmed
 composition/export owner using that interface as `authorityRoot`; run `software_build` only after
 all confirmed owners converge and on the final integration proof.
 ## Contract-Required Decomposition
-
 When `decompositionContract.taskContractRequired=true`, every child uses
 `task-contract.v1`. Legacy-only tasks are forbidden.
 
@@ -106,13 +98,20 @@ the final gate to `productionGateReviewer` (normally Dolores), never William or 
 semantic slices, the validator checks mechanics, and Mission Control remains final authority.
 
 ## Canonical Manifest Workflow
-
 Use this workflow for every contract-required graph:
 
-1. If the objective exposes `lastDecompositionCandidate` and `lastDecompositionLintErrors`, use
-   that candidate as the canonical prior draft: preserve task IDs and slices, reconstruct
-   `manifest.json`, and correct only reported findings. Otherwise create the initial
-   `contract-decomposition-manifest.v1` manifest.
+1. Run `decomposition_checkpoint.py resume`. Reuse its manifest when present. Otherwise, immediately
+   create the canonical skeleton before exploring source:
+```bash
+python3 scripts/build_contract_decomposition.py \
+  --init-manifest objective.json manifest.json
+```
+   The manifest must exist within five non-write tool calls after reading the objective. Do not read
+   builder, validator, checkpoint, or submitter implementation source during normal decomposition;
+   their documented CLI and validator report are the complete operational interface. If bootstrap
+   fails, block with its error instead of reverse-engineering the tools.
+   If the objective exposes `lastDecompositionCandidate` and lint errors, preserve its task IDs and
+   slices in this same manifest and correct only reported findings.
 2. Give every slice a stable semantic `key`. Never change a key during correction.
    For a live graph amendment only, copy each existing child's authoritative ID into
    `persistedTaskId` and copy its accepted live `taskContract` exactly; omit the ID only for a

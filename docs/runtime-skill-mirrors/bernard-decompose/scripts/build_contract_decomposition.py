@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -20,6 +21,99 @@ LIST_FIELDS = (
     "provides",
     "consumes",
 )
+
+
+def semantic_key(value: str, index: int) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return normalized or f"slice-{index}"
+
+
+def initialize_manifest(objective: dict) -> dict:
+    objective_id = require_text(objective.get("id"), "id", "objective")
+    uuid.UUID(objective_id)
+    contract = objective.get("decompositionContract")
+    if not isinstance(contract, dict):
+        raise ValueError("objective decompositionContract is required")
+    approved_slices = contract.get("approvedSlices")
+    if not isinstance(approved_slices, list) or not approved_slices:
+        raise ValueError("objective decompositionContract.approvedSlices must be a non-empty list")
+
+    tasks: list[dict] = []
+    used_keys: set[str] = set()
+    reviewer = objective.get("productionGateReviewer") or contract.get("productionGateReviewer")
+    for index, approved_slice in enumerate(approved_slices):
+        if isinstance(approved_slice, str):
+            title = require_text(approved_slice, f"approvedSlices[{index}]", "objective")
+            workflow_family = ""
+            artifact_class = ""
+        elif isinstance(approved_slice, dict):
+            title = require_text(
+                approved_slice.get("name"),
+                f"approvedSlices[{index}].name",
+                "objective",
+            )
+            workflow_family = str(approved_slice.get("workflowFamily") or "")
+            artifact_class = str(approved_slice.get("primaryArtifactClass") or "")
+        else:
+            raise ValueError(f"approvedSlices[{index}] must be a string or object")
+
+        base_key = semantic_key(title, index)
+        key = base_key
+        suffix = 2
+        while key in used_keys:
+            key = f"{base_key}-{suffix}"
+            suffix += 1
+        used_keys.add(key)
+        is_gate_review = artifact_class == "review_gate"
+        task = {
+            "key": key,
+            "requirements": [f"slice:{index}"],
+            "title": title,
+            "assignee": reviewer if is_gate_review and isinstance(reviewer, str) else "William",
+            "taskType": "review" if is_gate_review else "execution",
+            "priority": "P1",
+            "nextAction": "",
+            "dependsOn": [],
+            "contract": {
+                "semanticHinge": "",
+                "workflowFamily": workflow_family,
+                "mutationRoot": "",
+                "authorityRoot": "",
+                "proofRoot": "",
+                "acceptanceHinge": "",
+                "writableFiles": [],
+                "createdFileGlobs": [],
+                "proofFiles": [],
+                "readOnlyAnchors": [],
+                "outputArtifacts": [],
+                "provides": [],
+                "consumes": [],
+                "verification": {"focusedTests": [], "qualityGates": []},
+                "productionEvidence": [],
+                "primaryArtifactClass": artifact_class,
+                "plan": {
+                    "outcome": "",
+                    "inspect": "",
+                    "derive": "",
+                    "apply": "",
+                    "verify": "",
+                    "operation": "",
+                    "symbols": [],
+                    "invariant": "",
+                    "completionChecks": [],
+                },
+            },
+        }
+        if is_gate_review:
+            task["reviewMode"] = "gate_review"
+        tasks.append(task)
+
+    return {
+        "kind": "contract-decomposition-manifest.v1",
+        "objectiveId": objective_id,
+        "statusNote": "",
+        "tasks": tasks,
+    }
 
 
 def fail(message: str) -> int:
@@ -192,9 +286,29 @@ def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
 
 
 def main() -> int:
+    if len(sys.argv) == 4 and sys.argv[1] == "--init-manifest":
+        try:
+            objective = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+            if not isinstance(objective, dict):
+                raise ValueError("objective must be an object")
+            manifest = initialize_manifest(objective)
+            Path(sys.argv[3]).write_text(
+                json.dumps(manifest, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            return fail(str(exc))
+        print(json.dumps({
+            "ok": True,
+            "mode": "init_manifest",
+            "taskCount": len(manifest["tasks"]),
+            "output": sys.argv[3],
+        }))
+        return 0
     if len(sys.argv) not in (3, 5) or (len(sys.argv) == 5 and sys.argv[3] != "--objective"):
         print(
-            "usage: build_contract_decomposition.py <manifest.json> <decomposition.json> "
+            "usage: build_contract_decomposition.py --init-manifest <objective.json> <manifest.json>\n"
+            "   or: build_contract_decomposition.py <manifest.json> <decomposition.json> "
             "[--objective <objective.json>]",
             file=sys.stderr,
         )

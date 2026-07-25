@@ -507,6 +507,93 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertIn("One final `integration_proof`", skill)
         self.assertIn("Production Delivery Profiles", skill)
         self.assertIn("productionGateReviewer", skill)
+        self.assertIn("--init-manifest objective.json manifest.json", skill)
+        self.assertIn("within five non-write tool calls", skill)
+        self.assertIn("Do not read", skill)
+        self.assertIn("implementation source during normal decomposition", skill)
+
+    def test_manifest_bootstrap_is_deterministic_and_slice_complete(self) -> None:
+        objective = {
+            "id": str(uuid.uuid4()),
+            "decompositionContract": {
+                "productionGateReviewer": "Dolores",
+                "approvedSlices": [
+                    {
+                        "name": "Author bounded contract",
+                        "workflowFamily": "storage",
+                        "primaryArtifactClass": "contract_family",
+                    },
+                    {
+                        "name": "Gate review",
+                        "workflowFamily": "storage",
+                        "primaryArtifactClass": "review_gate",
+                    },
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            objective_path = Path(temp_dir) / "objective.json"
+            first_path = Path(temp_dir) / "first-manifest.json"
+            second_path = Path(temp_dir) / "second-manifest.json"
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            commands = (
+                ["python3", str(CONTRACT_BUILDER), "--init-manifest", str(objective_path), str(first_path)],
+                ["python3", str(CONTRACT_BUILDER), "--init-manifest", str(objective_path), str(second_path)],
+            )
+            results = [
+                subprocess.run(
+                    command,
+                    cwd=REPO_ROOT,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                for command in commands
+            ]
+
+            self.assertEqual(results[0].returncode, 0, results[0].stderr)
+            self.assertEqual(results[1].returncode, 0, results[1].stderr)
+            self.assertEqual(first_path.read_text(), second_path.read_text())
+            manifest = json.loads(first_path.read_text(encoding="utf-8"))
+            self.assertEqual([task["requirements"] for task in manifest["tasks"]], [["slice:0"], ["slice:1"]])
+            self.assertEqual([task["key"] for task in manifest["tasks"]], ["author-bounded-contract", "gate-review"])
+            self.assertEqual(manifest["tasks"][1]["assignee"], "Dolores")
+            self.assertEqual(manifest["tasks"][1]["reviewMode"], "gate_review")
+            self.assertEqual(
+                set(manifest["tasks"][0]["contract"]["plan"]),
+                {
+                    "outcome",
+                    "inspect",
+                    "derive",
+                    "apply",
+                    "verify",
+                    "operation",
+                    "symbols",
+                    "invariant",
+                    "completionChecks",
+                },
+            )
+
+    def test_manifest_bootstrap_rejects_objective_without_approved_slices(self) -> None:
+        objective = {
+            "id": str(uuid.uuid4()),
+            "decompositionContract": {"approvedSlices": []},
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            objective_path = Path(temp_dir) / "objective.json"
+            manifest_path = Path(temp_dir) / "manifest.json"
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            result = subprocess.run(
+                ["python3", str(CONTRACT_BUILDER), "--init-manifest", str(objective_path), str(manifest_path)],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("approvedSlices must be a non-empty list", result.stderr)
+            self.assertFalse(manifest_path.exists())
 
     def test_structured_approved_slice_requirement_is_enforced(self) -> None:
         manifest, objective = convergence_manifest()
