@@ -35,8 +35,10 @@ def initialize_manifest(objective: dict) -> dict:
     if not isinstance(contract, dict):
         raise ValueError("objective decompositionContract is required")
     approved_slices = contract.get("approvedSlices")
-    if not isinstance(approved_slices, list) or not approved_slices:
-        raise ValueError("objective decompositionContract.approvedSlices must be a non-empty list")
+    if approved_slices is None:
+        approved_slices = []
+    if not isinstance(approved_slices, list):
+        raise ValueError("objective decompositionContract.approvedSlices must be a list when present")
 
     tasks: list[dict] = []
     used_keys: set[str] = set()
@@ -113,6 +115,7 @@ def initialize_manifest(objective: dict) -> dict:
         "objectiveId": objective_id,
         "statusNote": "",
         "contractGuide": {
+            "sliceSource": "objective_approved" if approved_slices else "bernard_authored",
             "planOperations": ["add", "modify", "remove"],
             "unassignedRequirements": [
                 *[

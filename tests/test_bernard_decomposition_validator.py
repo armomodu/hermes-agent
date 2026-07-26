@@ -591,6 +591,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             self.assertEqual([task["key"] for task in manifest["tasks"]], ["author-bounded-contract", "gate-review"])
             self.assertEqual(manifest["tasks"][1]["assignee"], "Dolores")
             self.assertEqual(manifest["tasks"][1]["reviewMode"], "gate_review")
+            self.assertEqual(manifest["contractGuide"]["sliceSource"], "objective_approved")
             self.assertEqual(manifest["contractGuide"]["planOperations"], ["add", "modify", "remove"])
             self.assertEqual(manifest["tasks"][0]["contract"]["plan"]["operation"], "modify")
             self.assertEqual(
@@ -628,10 +629,28 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             ["final_integration_proof"],
         )
 
-    def test_manifest_bootstrap_rejects_objective_without_approved_slices(self) -> None:
+    def test_manifest_bootstrap_supports_bernard_authored_slices(self) -> None:
         objective = {
             "id": str(uuid.uuid4()),
-            "decompositionContract": {"approvedSlices": []},
+            "decompositionContract": {
+                "mode": "payload_only",
+                "requiredOwnershipPaths": ["apps/mission-control/src/lib/example.ts"],
+                "proofExpected": ["Example remains correct"],
+            },
+        }
+        manifest = self._initialize_manifest(objective)
+
+        self.assertEqual(manifest["tasks"], [])
+        self.assertEqual(manifest["contractGuide"]["sliceSource"], "bernard_authored")
+        self.assertEqual(
+            manifest["contractGuide"]["unassignedRequirements"],
+            ["ownership:apps/mission-control/src/lib/example.ts", "proof:0"],
+        )
+
+    def test_manifest_bootstrap_rejects_non_list_approved_slices(self) -> None:
+        objective = {
+            "id": str(uuid.uuid4()),
+            "decompositionContract": {"approvedSlices": "not-a-list"},
         }
         with tempfile.TemporaryDirectory() as temp_dir:
             objective_path = Path(temp_dir) / "objective.json"
@@ -646,7 +665,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("approvedSlices must be a non-empty list", result.stderr)
+            self.assertIn("approvedSlices must be a list when present", result.stderr)
             self.assertFalse(manifest_path.exists())
 
     def test_objective_fetcher_uses_bounded_authenticated_interface(self) -> None:

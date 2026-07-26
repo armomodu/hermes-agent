@@ -111,6 +111,7 @@ python3 scripts/build_contract_decomposition.py \
    builder, validator, checkpoint, or submitter implementation source during normal decomposition;
    their documented CLI and validator report are the complete operational interface. If bootstrap
    fails, block with its error instead of reverse-engineering the tools.
+   `sliceSource=bernard_authored` means add stable semantic tasks without `slice:N`; `objective_approved` means keep generated tasks and their `slice:N`.
    If the objective exposes `lastDecompositionCandidate` and lint errors, preserve its task IDs and
    slices in this same manifest and correct only reported findings.
 2. Give every slice a stable semantic `key`. Never change a key during correction.
@@ -124,13 +125,12 @@ python3 scripts/build_contract_decomposition.py \
 3. Assign objective requirements with stable IDs:
    - `ownership:<exact required path>`;
    - `proof:<zero-based proofExpected index>`;
-   - `slice:<zero-based approvedSlices index>` (position-based for string or structured records).
+   - `slice:<zero-based approvedSlices index>` only for `sliceSource=objective_approved`.
 4. Express dependencies by key.
 5. Put all task-specific contract truth in each `contract`, including a compact `plan`.
    Assign every `contractGuide.unassignedRequirements` entry exactly once. Plan `operation` is only
    `add`, `modify`, or `remove`; created paths remain equal to or below their exact mutation root.
 6. Expand and checkpoint:
-
 ```bash
 python3 scripts/build_contract_decomposition.py \
   manifest.json decomposition.json --objective objective.json
