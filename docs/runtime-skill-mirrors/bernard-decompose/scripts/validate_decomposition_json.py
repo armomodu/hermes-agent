@@ -583,6 +583,7 @@ def validate_repair_payload(payload: object) -> int:
         payload.get("taskContract"),
         source_task_id,
         strict_plan=True,
+        strict_graph=True,
     )
     if issue:
         return fail(issue)

@@ -220,16 +220,16 @@ Before expansion, verify:
 For a marked `task_repair_result` card:
 
 1. Preserve source task ID and attempt number.
-2. Repair only the contract defect and required read-only/created paths.
-3. Include a complete ordered `executionPlan`.
-4. Write the exact result to `task-repair-result.json`.
-5. Run:
+2. Repair only the defect; one exact writable file requires that exact `mutationRoot`.
+4. Include a complete ordered `executionPlan`.
+5. Write the exact result to `task-repair-result.json`.
+6. Run:
 
 ```bash
 python3 scripts/validate_decomposition_json.py --repair task-repair-result.json
 ```
 
-6. Return the exact validated JSON. Mission Control performs full-graph validation.
+7. Return the exact validated JSON. Mission Control performs full-graph validation.
 
 Never complete a marked repair card with prose, null output, or an unvalidated contract.
 

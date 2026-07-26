@@ -98,7 +98,7 @@ def task_contract(root: str) -> dict:
 
 
 def repair_payload() -> dict:
-    return {
+    payload = {
         "kind": "task_repair_result",
         "sourceTaskId": str(uuid.uuid4()),
         "sourceAttemptNumber": 2,
@@ -106,6 +106,8 @@ def repair_payload() -> dict:
         "title": "Repair release workflow contract",
         "nextAction": "Execute the validated bounded plan",
     }
+    payload["taskContract"]["mutationRoot"] = payload["taskContract"]["writableFiles"][0]
+    return payload
 
 
 def contract_required_payload() -> dict:
@@ -1599,6 +1601,15 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(payload, "--repair")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unresolved reference", result.stderr)
+
+    def test_repair_rejects_broad_root_for_one_exact_writable_file(self) -> None:
+        payload = repair_payload()
+        payload["taskContract"]["mutationRoot"] = (
+            "apps/mission-control/src/lib/knowledge-plane/contracts"
+        )
+        result = self.run_validator(payload, "--repair")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must equal its one exact writable file", result.stderr)
 
     def test_repair_allows_exact_preserve_only_sibling_authority(self) -> None:
         payload = repair_payload()
