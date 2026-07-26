@@ -1585,6 +1585,18 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
             stage=f"tool result {function_name}",
         )
 
+        if (
+            not _execution_blocked
+            and not _is_error_result
+            and function_name in {"kanban_complete", "kanban_block"}
+        ):
+            try:
+                terminal_payload = json.loads(function_result)
+            except (TypeError, json.JSONDecodeError):
+                terminal_payload = {}
+            if terminal_payload.get("ok") is True:
+                agent._kanban_terminal_handoff = True
+
         # ── Per-tool /steer drain ───────────────────────────────────
         # Drain pending steer BETWEEN individual tool calls so the
         # injection lands as soon as a tool finishes — not after the
@@ -1614,6 +1626,30 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                     agent,
                     messages,
                     stage=f"skipped tool result {skipped_name}",
+                )
+            break
+
+        if agent._kanban_terminal_handoff and i < len(assistant_message.tool_calls):
+            remaining_calls = assistant_message.tool_calls[i:]
+            agent._vprint(
+                f"{agent.log_prefix}📋 Terminal Kanban handoff: skipping "
+                f"{len(remaining_calls)} remaining tool call(s)",
+                force=True,
+            )
+            for skipped_tc in remaining_calls:
+                skipped_name = skipped_tc.function.name
+                messages.append(make_tool_result_message(
+                    skipped_name,
+                    (
+                        f"[Tool execution skipped — {skipped_name} was not started "
+                        "because the Kanban task is already terminal]"
+                    ),
+                    skipped_tc.id,
+                ))
+                _flush_session_db_after_tool_progress(
+                    agent,
+                    messages,
+                    stage=f"terminal handoff skipped tool result {skipped_name}",
                 )
             break
 

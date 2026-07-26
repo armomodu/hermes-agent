@@ -2525,6 +2525,18 @@ class TestConcurrentToolExecution:
                 mock_seq.assert_called_once()
                 mock_con.assert_not_called()
 
+    def test_kanban_completion_forces_sequential(self, agent):
+        """Terminal Kanban handoffs must run before and exclude later tools."""
+        tc1 = _mock_tool_call(name="read_file", arguments='{"path":"x.py"}', call_id="c1")
+        tc2 = _mock_tool_call(name="kanban_complete", arguments='{"summary":"done"}', call_id="c2")
+        mock_msg = _mock_assistant_msg(content="", tool_calls=[tc1, tc2])
+        messages = []
+        with patch.object(agent, "_execute_tool_calls_sequential") as mock_seq:
+            with patch.object(agent, "_execute_tool_calls_concurrent") as mock_con:
+                agent._execute_tool_calls(mock_msg, messages, "task-1")
+                mock_seq.assert_called_once()
+                mock_con.assert_not_called()
+
     def test_multiple_tools_uses_concurrent_path(self, agent):
         """Multiple read-only tools should use concurrent path."""
         tc1 = _mock_tool_call(name="web_search", arguments='{}', call_id="c1")

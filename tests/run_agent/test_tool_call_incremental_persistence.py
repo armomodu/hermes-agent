@@ -46,13 +46,13 @@ def _make_tool_defs(*names: str) -> list:
     ]
 
 
-def _make_agent():
+def _make_agent(*tool_names: str):
     hermes_home = Path(tempfile.mkdtemp(prefix="hermes-test-home-"))
     (hermes_home / "logs").mkdir(parents=True, exist_ok=True)
     with (
         patch(
             "run_agent.get_tool_definitions",
-            return_value=_make_tool_defs("web_search"),
+            return_value=_make_tool_defs(*(tool_names or ("web_search",))),
         ),
         patch("run_agent.check_toolset_requirements", return_value={}),
         patch("run_agent.OpenAI"),
@@ -142,6 +142,37 @@ def test_run_conversation_flushes_assistant_tool_call_before_execution():
     assert result["final_response"] == "done"
 
 
+def test_run_conversation_stops_after_terminal_kanban_handoff():
+    agent = _make_agent("kanban_complete")
+    tool_call = _mock_tool_call(name="kanban_complete", call_id="c1")
+    agent.client.chat.completions.create.return_value = _mock_response(
+        content="Work verified and complete.",
+        finish_reason="tool_calls",
+        tool_calls=[tool_call],
+    )
+
+    def _fake_execute(assistant_message, messages, effective_task_id, api_call_count=0):
+        messages.append(
+            make_tool_result_message(
+                "kanban_complete",
+                '{"ok":true,"task_id":"task-1","run_id":7}',
+                "c1",
+            )
+        )
+        agent._kanban_terminal_handoff = True
+
+    with (
+        patch.object(agent, "_persist_session"),
+        patch.object(agent, "_save_trajectory"),
+        patch.object(agent, "_cleanup_task_resources"),
+        patch.object(agent, "_execute_tool_calls", side_effect=_fake_execute),
+    ):
+        result = agent.run_conversation("finish the task")
+
+    assert agent.client.chat.completions.create.call_count == 1
+    assert result["final_response"] == "Work verified and complete."
+
+
 # ---------------------------------------------------------------------------
 # Contract 2: the SEQUENTIAL path flushes each tool result immediately, BEFORE
 # the next tool dispatches.  Dispatch goes through run_agent.handle_function_call
@@ -196,6 +227,35 @@ def test_execute_tool_calls_sequential_flushes_each_tool_result_before_next_disp
         ("dispatch", "c2"),
         ("flush", "tool", "c2"),
     ]
+
+
+def test_successful_terminal_kanban_handoff_skips_remaining_tool_calls():
+    agent = _make_agent()
+    tool_calls = [
+        _mock_tool_call(name="kanban_complete", call_id="c1"),
+        _mock_tool_call(name="write_file", call_id="c2"),
+    ]
+    messages: list = []
+    assistant_message = SimpleNamespace(content="", tool_calls=tool_calls)
+
+    def _fake_dispatch(function_name, function_args, effective_task_id, **kwargs):
+        if function_name == "kanban_complete":
+            return '{"ok":true,"task_id":"task-1","run_id":7}'
+        raise AssertionError("post-completion mutation must not execute")
+
+    with (
+        patch("run_agent.handle_function_call", side_effect=_fake_dispatch) as dispatch,
+        patch(
+            "agent.tool_executor.maybe_persist_tool_result",
+            side_effect=lambda **kwargs: kwargs["content"],
+        ),
+    ):
+        agent._execute_tool_calls_sequential(assistant_message, messages, "task-1")
+
+    assert dispatch.call_count == 1
+    assert agent._kanban_terminal_handoff is True
+    assert [message["tool_call_id"] for message in messages] == ["c1", "c2"]
+    assert "already terminal" in messages[1]["content"]
 
 
 # ---------------------------------------------------------------------------

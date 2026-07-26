@@ -547,6 +547,8 @@ def run_conversation(
     Returns:
         Dict: Complete conversation result with final response and message history
     """
+    agent._kanban_terminal_handoff = False
+
     if moa_config is None:
         try:
             from hermes_cli.moa_config import decode_moa_turn
@@ -4529,6 +4531,14 @@ def run_conversation(
                         pass
 
                 agent._execute_tool_calls(assistant_message, messages, effective_task_id, api_call_count)
+
+                if getattr(agent, "_kanban_terminal_handoff", False):
+                    _turn_exit_reason = "kanban_terminal_handoff"
+                    final_response = (
+                        assistant_message.content
+                        or "Kanban task handoff completed."
+                    )
+                    break
 
                 if agent._tool_guardrail_halt_decision is not None:
                     decision = agent._tool_guardrail_halt_decision
