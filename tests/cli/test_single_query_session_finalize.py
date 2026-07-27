@@ -55,6 +55,29 @@ def test_finalize_single_query_releases_session_when_cleanup_fails(monkeypatch):
     assert calls == ["finalize", "cleanup", "release"]
 
 
+def test_cleanup_closes_owning_agent_and_finalizes_session(monkeypatch):
+    import cli as cli_mod
+
+    calls = []
+    agent = SimpleNamespace(
+        session_id="kanban-session",
+        _session_messages=[],
+        shutdown_memory_provider=lambda _messages: calls.append("memory"),
+        close=lambda: calls.append("close"),
+    )
+    monkeypatch.setattr(cli_mod, "_cleanup_done", False)
+    monkeypatch.setattr(cli_mod, "_active_agent_ref", agent)
+    monkeypatch.setattr(cli_mod, "_reset_terminal_input_modes_on_exit", lambda: None)
+    monkeypatch.setattr(cli_mod, "_cleanup_all_terminals", lambda: None)
+    monkeypatch.setattr(cli_mod, "_cleanup_all_browsers", lambda: None)
+    monkeypatch.setattr("tools.mcp_tool.shutdown_mcp_servers", lambda: None)
+    monkeypatch.setattr("agent.auxiliary_client.shutdown_cached_clients", lambda: None)
+
+    cli_mod._run_cleanup(notify_session_finalize=False)
+
+    assert calls == ["memory", "close"]
+
+
 def test_finalize_single_query_runs_cleanup_when_finalize_hook_fails(monkeypatch):
     calls = []
     fake_agent = SimpleNamespace(session_id="agent-session", platform="cli")

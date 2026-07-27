@@ -1055,6 +1055,14 @@ def _run_cleanup(*, notify_session_finalize: bool = True):
                 _active_agent_ref.shutdown_memory_provider()
     except Exception as e:
         logger.warning("CLI cleanup memory shutdown failed: %s", e, exc_info=True)
+    # One-shot and Kanban agents own their SQLite session row. Close the agent
+    # after memory finalization so the row receives ended_at/end_reason and the
+    # next run never appears to share an indefinitely active session.
+    try:
+        if _active_agent_ref and hasattr(_active_agent_ref, "close"):
+            _active_agent_ref.close()
+    except Exception as e:
+        logger.warning("CLI cleanup agent close failed: %s", e, exc_info=True)
 
 
 def _should_emit_cleanup_session_finalize(session_id: str | None) -> bool:

@@ -1,0 +1,10 @@
+name: mc-context-efficiency
+version: "1.0.0"
+description: "Mission Control context-efficiency observer. Records additive, content-free request and session metrics through stable Hermes hooks."
+author: MaronCorp
+hooks:
+  - pre_api_request
+  - post_api_request
+  - api_request_error
+  - on_session_finalize
+
