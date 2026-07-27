@@ -191,6 +191,7 @@ class _SessionTotals:
     max_prompt_tokens: int = 0
     first_prompt_tokens: int = 0
     last_prompt_tokens: int = 0
+    last_message_count: int = 0
     compaction_count: int = 0
     estimated_categories: Counter[str] = field(default_factory=Counter)
     repeated_tool_calls: int = 0
@@ -207,6 +208,7 @@ def on_pre_api_request(**kwargs: Any) -> None:
     repeated = sum(count - 1 for count in signatures.values() if count > 1)
     estimated_total = sum(breakdown.values())
     approx_input = int(kwargs.get("approx_input_tokens") or 0)
+    message_count = int(kwargs.get("message_count") or len(messages))
 
     with _LOCK:
         totals = _SESSIONS.setdefault(session_id, _SessionTotals())
@@ -218,9 +220,19 @@ def on_pre_api_request(**kwargs: Any) -> None:
         prompt_tokens = max(approx_input, estimated_total)
         if totals.first_prompt_tokens == 0:
             totals.first_prompt_tokens = prompt_tokens
-        if totals.last_prompt_tokens > 0 and prompt_tokens < totals.last_prompt_tokens * 0.7:
+        token_drop = (
+            totals.last_prompt_tokens > 0
+            and prompt_tokens < totals.last_prompt_tokens * 0.7
+        )
+        message_drop = (
+            totals.last_message_count >= 10
+            and message_count < totals.last_message_count * 0.7
+        )
+        compaction_detected = token_drop or message_drop
+        if compaction_detected:
             totals.compaction_count += 1
         totals.last_prompt_tokens = prompt_tokens
+        totals.last_message_count = message_count
         totals.max_prompt_tokens = max(totals.max_prompt_tokens, prompt_tokens)
         totals.estimated_categories.update(breakdown)
         totals.repeated_tool_calls = max(totals.repeated_tool_calls, repeated)
@@ -237,7 +249,8 @@ def on_pre_api_request(**kwargs: Any) -> None:
         "provider": str(kwargs.get("provider") or ""),
         "estimatedPromptTokens": max(approx_input, estimated_total),
         "categories": breakdown,
-        "messageCount": int(kwargs.get("message_count") or 0),
+        "messageCount": message_count,
+        "compactionDetected": compaction_detected,
         "toolCount": int(kwargs.get("tool_count") or 0),
         "repeatedToolCalls": repeated,
         "requestHash": _stable_hash(body),
@@ -327,6 +340,7 @@ def on_session_finalize(**kwargs: Any) -> None:
         "firstPromptTokens": totals.first_prompt_tokens,
         "lastPromptTokens": totals.last_prompt_tokens,
         "compactionCount": totals.compaction_count,
+        "compactionDetection": "request_shape_inference",
         "estimatedCategories": dict(totals.estimated_categories),
         "repeatedToolCalls": totals.repeated_tool_calls,
         "taskIds": sorted(totals.task_ids),

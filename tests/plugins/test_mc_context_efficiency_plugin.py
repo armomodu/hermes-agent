@@ -202,7 +202,35 @@ def test_session_finalization_reports_cumulative_usage(tmp_path, monkeypatch):
     assert final["maxPromptTokens"] == 120
     assert final["taskIds"] == ["task-2"]
     assert final["compactionCount"] == 0
+    assert final["compactionDetection"] == "request_shape_inference"
     assert final["guardrails"] == []
+
+
+def test_infers_compaction_from_large_message_count_drop(tmp_path, monkeypatch):
+    plugin = _load_plugin()
+    output = tmp_path / "context.jsonl"
+    monkeypatch.setenv("HERMES_CONTEXT_TELEMETRY_PATH", str(output))
+
+    plugin.on_pre_api_request(
+        session_id="session-compaction",
+        api_call_count=1,
+        approx_input_tokens=70_000,
+        message_count=120,
+        request={"body": {"messages": []}},
+    )
+    plugin.on_pre_api_request(
+        session_id="session-compaction",
+        api_call_count=2,
+        approx_input_tokens=61_000,
+        message_count=16,
+        request={"body": {"messages": []}},
+    )
+    plugin.on_session_finalize(session_id="session-compaction", reason="done")
+
+    records = [json.loads(line) for line in output.read_text().splitlines()]
+    assert records[0]["compactionDetected"] is False
+    assert records[1]["compactionDetected"] is True
+    assert records[-1]["compactionCount"] == 1
 
 
 def test_shadow_guardrails_flag_cost_without_blocking(tmp_path, monkeypatch):
