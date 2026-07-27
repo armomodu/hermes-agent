@@ -260,3 +260,164 @@ def test_shadow_guardrails_flag_cost_without_blocking(tmp_path, monkeypatch):
         "cumulative_input_budget_exceeded",
         "cache_utilization_missing",
     ]
+
+
+def _duplicate_tool_request(task_id):
+    duplicate = "same governed proof output " * 80
+    messages = [
+        {"role": "system", "content": "system contract"},
+        {
+            "role": "user",
+            "content": (
+                f"MC Task ID: {task_id}\n"
+                "Objective ID: 749b54d1-52b4-4352-8539-c4a2fc9c7710\n"
+                "MC Completion Contract: execution_result"
+            ),
+        },
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "call-old", "function": {"name": "terminal"}}],
+        },
+        {"role": "tool", "tool_call_id": "call-old", "content": duplicate},
+    ]
+    messages.extend(
+        {"role": "assistant", "content": f"working-memory-{index}"}
+        for index in range(20)
+    )
+    messages.extend([
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "call-new", "function": {"name": "terminal"}}],
+        },
+        {"role": "tool", "tool_call_id": "call-new", "content": duplicate},
+    ])
+    return {
+        "model": "test-model",
+        "messages": messages,
+        "tools": [{"type": "function", "function": {"name": "terminal"}}],
+        "unknown_future_field": {"preserve": True},
+    }
+
+
+def test_complete_prompt_shadow_measures_without_mutating_request(tmp_path, monkeypatch):
+    plugin = _load_plugin()
+    output = tmp_path / "context.jsonl"
+    monkeypatch.setenv("HERMES_CONTEXT_TELEMETRY_PATH", str(output))
+    monkeypatch.setenv("HERMES_CONTEXT_MODE", "shadow")
+    task_id = "000d205e-5dc9-5eb1-95f2-8bcad1cac23e"
+    request = _duplicate_tool_request(task_id)
+
+    assert plugin.on_llm_request(
+        session_id="session-shadow",
+        task_id=task_id,
+        api_request_id="request-shadow",
+        request=request,
+    ) is None
+    plugin.on_session_finalize(session_id="session-shadow", reason="done")
+
+    records = [json.loads(line) for line in output.read_text().splitlines()]
+    comparison = records[0]
+    assert comparison["event"] == "complete_prompt_comparison"
+    assert comparison["deliveredContext"] == "full"
+    assert comparison["fallbackReason"] == "shadow_only"
+    assert comparison["boundedEstimatedTokens"] < comparison["fullEstimatedTokens"]
+    assert comparison["duplicateToolOutputsCompacted"] == 1
+    assert request == _duplicate_tool_request(task_id)
+    assert records[-1]["completePromptComparison"] == {
+        "matchedCallCount": 1,
+        "fullEstimatedTokens": comparison["fullEstimatedTokens"],
+        "boundedEstimatedTokens": comparison["boundedEstimatedTokens"],
+        "fallbackCount": 0,
+        "boundedDeliveryCount": 0,
+        "measurementSource": "provider_request",
+    }
+
+
+def test_allowlisted_bounded_delivery_preserves_unique_and_unknown_context(
+    tmp_path, monkeypatch
+):
+    plugin = _load_plugin()
+    output = tmp_path / "context.jsonl"
+    monkeypatch.setenv("HERMES_CONTEXT_TELEMETRY_PATH", str(output))
+    monkeypatch.setenv("HERMES_CONTEXT_MODE", "bounded")
+    task_id = "000d205e-5dc9-5eb1-95f2-8bcad1cac23e"
+    monkeypatch.setenv("HERMES_CONTEXT_TASK_IDS", task_id)
+    request = _duplicate_tool_request(task_id)
+
+    result = plugin.on_llm_request(
+        session_id="session-bounded",
+        task_id=task_id,
+        api_request_id="request-bounded",
+        request=request,
+    )
+
+    assert result["source"] == "mc-context-efficiency"
+    bounded = result["request"]
+    assert bounded["unknown_future_field"] == {"preserve": True}
+    assert bounded["messages"][0] == request["messages"][0]
+    assert bounded["messages"][1] == request["messages"][1]
+    assert bounded["messages"][-1] == request["messages"][-1]
+    assert bounded["messages"][3]["tool_call_id"] == "call-old"
+    assert "exact duplicate tool output retained" in bounded["messages"][3]["content"]
+    assert request["messages"][3]["content"].startswith("same governed proof output")
+
+
+def test_bounded_mode_falls_back_when_not_allowlisted(tmp_path, monkeypatch):
+    plugin = _load_plugin()
+    output = tmp_path / "context.jsonl"
+    monkeypatch.setenv("HERMES_CONTEXT_TELEMETRY_PATH", str(output))
+    monkeypatch.setenv("HERMES_CONTEXT_MODE", "bounded")
+    request = _duplicate_tool_request(
+        "000d205e-5dc9-5eb1-95f2-8bcad1cac23e"
+    )
+
+    assert plugin.on_llm_request(
+        session_id="session-fallback",
+        api_request_id="request-fallback",
+        request=request,
+    ) is None
+    plugin.on_session_finalize(session_id="session-fallback", reason="done")
+
+    records = [json.loads(line) for line in output.read_text().splitlines()]
+    assert records[0]["fallbackReason"] == "not_allowlisted"
+    assert records[-1]["completePromptComparison"]["fallbackCount"] == 1
+
+
+def test_unknown_context_mode_preserves_legacy_request(tmp_path, monkeypatch):
+    plugin = _load_plugin()
+    output = tmp_path / "context.jsonl"
+    monkeypatch.setenv("HERMES_CONTEXT_TELEMETRY_PATH", str(output))
+    monkeypatch.setenv("HERMES_CONTEXT_MODE", "future-mode")
+
+    assert plugin.on_llm_request(
+        session_id="session-future",
+        request={"messages": [{"role": "user", "content": "keep exact"}]},
+    ) is None
+    assert not output.exists()
+
+
+def test_profile_settings_survive_gateway_environment_regeneration(
+    tmp_path, monkeypatch
+):
+    plugin = _load_plugin()
+    output = tmp_path / "context.jsonl"
+    task_id = "000d205e-5dc9-5eb1-95f2-8bcad1cac23e"
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_CONTEXT_TELEMETRY_PATH", str(output))
+    monkeypatch.delenv("HERMES_CONTEXT_MODE", raising=False)
+    monkeypatch.delenv("BOUNDED_CONTEXT_MODE", raising=False)
+    monkeypatch.delenv("HERMES_CONTEXT_TASK_IDS", raising=False)
+    (tmp_path / "context-efficiency.json").write_text(json.dumps({
+        "version": "mc-context-efficiency-settings.v1",
+        "mode": "bounded",
+        "taskIds": [task_id],
+        "objectiveIds": [],
+    }))
+
+    result = plugin.on_llm_request(
+        session_id="session-profile-settings",
+        task_id=task_id,
+        request=_duplicate_tool_request(task_id),
+    )
+
+    assert result["source"] == "mc-context-efficiency"

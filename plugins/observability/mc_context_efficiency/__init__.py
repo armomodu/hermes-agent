@@ -1,13 +1,17 @@
-"""Upgrade-safe Mission Control context-efficiency observer.
+"""Upgrade-safe Mission Control context-efficiency compatibility layer.
 
-The plugin records counts, hashes, and token estimates only. It never changes
-the provider request and telemetry failures are deliberately non-fatal.
+Observer hooks record content-free request/session metrics. Stable LLM request
+middleware optionally measures or removes earlier exact duplicate tool output;
+legacy and shadow modes never change the provider request, and middleware
+failure remains fail-open through Hermes' compatibility contract.
 """
 
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass, field
+from functools import lru_cache
 from hashlib import sha256
 import json
 import os
@@ -25,6 +29,14 @@ _MC_TASK_ID_PATTERN = re.compile(
     r"(?m)^\s*(?:MC )?Task ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$",
     re.IGNORECASE,
 )
+_MC_OBJECTIVE_ID_PATTERN = re.compile(
+    r"(?m)^\s*Objective ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$",
+    re.IGNORECASE,
+)
+_COMPLETE_CONTEXT_MODES = {"legacy", "shadow", "bounded"}
+_DUPLICATE_TOOL_OUTPUT_MIN_BYTES = 512
+_PROTECTED_TAIL_MESSAGES = 6
+_SETTINGS_VERSION = "mc-context-efficiency-settings.v1"
 
 
 def _estimated_tokens(value: Any) -> int:
@@ -131,6 +143,146 @@ def _mc_task_ids(messages: list[dict[str, Any]]) -> set[str]:
     return task_ids
 
 
+def _mc_objective_ids(messages: list[dict[str, Any]]) -> set[str]:
+    objective_ids: set[str] = set()
+    for message in messages:
+        text = _message_text(message)
+        objective_ids.update(
+            match.group(1).lower()
+            for match in _MC_OBJECTIVE_ID_PATTERN.finditer(text)
+        )
+    return objective_ids
+
+
+@lru_cache(maxsize=16)
+def _profile_settings(home: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(
+            (Path(home).expanduser() / "context-efficiency.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        if (
+            isinstance(payload, dict)
+            and payload.get("version") == _SETTINGS_VERSION
+        ):
+            return payload
+    except Exception:
+        pass
+    return {}
+
+
+def _setting_values(env_name: str, setting_name: str) -> set[str]:
+    configured = os.environ.get(env_name, "")
+    if configured.strip():
+        values: Any = configured.split(",")
+    else:
+        values = _profile_settings(
+            os.environ.get("HERMES_HOME", "~/.hermes")
+        ).get(setting_name, [])
+    if not isinstance(values, list):
+        return set()
+    return {
+        value.strip().lower()
+        for value in values
+        if isinstance(value, str) and value.strip()
+    }
+
+
+def _complete_context_mode() -> str:
+    requested = os.environ.get("HERMES_CONTEXT_MODE") or os.environ.get(
+        "BOUNDED_CONTEXT_MODE"
+    )
+    if not requested:
+        requested = str(
+            _profile_settings(
+                os.environ.get("HERMES_HOME", "~/.hermes")
+            ).get("mode", "legacy")
+        )
+    requested = requested.strip().lower()
+    return requested if requested in _COMPLETE_CONTEXT_MODES else "legacy"
+
+
+def _provider_messages(request: dict[str, Any]) -> tuple[str | None, list[Any]]:
+    for key in ("messages", "input"):
+        value = request.get(key)
+        if isinstance(value, list):
+            return key, list(value)
+    return None, []
+
+
+def _duplicate_tool_output_candidate(
+    request: dict[str, Any],
+) -> tuple[dict[str, Any], bool, list[str], int]:
+    """Replace only earlier exact duplicate tool outputs.
+
+    Every unique output, task envelope, system/developer message, user message,
+    assistant decision, tool-call identity, and the protected tail remain
+    byte-for-byte unchanged. The latest copy of duplicate output remains exact,
+    so the candidate removes no unique information.
+    """
+    key, messages = _provider_messages(request)
+    if key is None or not messages:
+        return request, False, ["provider_messages"], 0
+
+    latest_by_hash: dict[str, int] = {}
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "") != "tool":
+            continue
+        content = message.get("content")
+        if (
+            not isinstance(content, str)
+            or len(content.encode("utf-8")) < _DUPLICATE_TOOL_OUTPUT_MIN_BYTES
+            or _is_task_envelope(content)
+        ):
+            continue
+        latest_by_hash[_stable_hash(content)] = index
+
+    candidate_messages = list(messages)
+    replaced = 0
+    protected_from = max(0, len(messages) - _PROTECTED_TAIL_MESSAGES)
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            continue
+        if index >= protected_from or str(message.get("role") or "") != "tool":
+            continue
+        content = message.get("content")
+        if not isinstance(content, str) or _is_task_envelope(content):
+            continue
+        content_hash = _stable_hash(content)
+        latest_index = latest_by_hash.get(content_hash)
+        if latest_index is None or latest_index <= index:
+            continue
+        compacted = dict(message)
+        compacted["content"] = (
+            "[Hermes bounded context: exact duplicate tool output retained at "
+            f"message {latest_index}; sha256={content_hash}; "
+            f"bytes={len(content.encode('utf-8'))}]"
+        )
+        candidate_messages[index] = compacted
+        replaced += 1
+
+    candidate = dict(request)
+    candidate[key] = candidate_messages
+    return candidate, True, [], replaced
+
+
+def _bounded_delivery_allowlisted(messages: list[Any]) -> bool:
+    structured = [message for message in messages if isinstance(message, dict)]
+    task_allowlist = _setting_values("HERMES_CONTEXT_TASK_IDS", "taskIds")
+    objective_allowlist = _setting_values(
+        "HERMES_CONTEXT_OBJECTIVE_IDS", "objectiveIds"
+    )
+    if not task_allowlist and not objective_allowlist:
+        return False
+    return bool(
+        _mc_task_ids(structured) & task_allowlist
+        or _mc_objective_ids(structured) & objective_allowlist
+    )
+
+
 def _tool_signatures(messages: list[dict[str, Any]]) -> Counter[str]:
     signatures: Counter[str] = Counter()
     for message in messages:
@@ -196,6 +348,87 @@ class _SessionTotals:
     estimated_categories: Counter[str] = field(default_factory=Counter)
     repeated_tool_calls: int = 0
     task_ids: set[str] = field(default_factory=set)
+    complete_prompt_matched_calls: int = 0
+    complete_prompt_full_tokens: int = 0
+    complete_prompt_bounded_tokens: int = 0
+    complete_prompt_fallback_count: int = 0
+    complete_prompt_bounded_delivery_count: int = 0
+
+
+def on_llm_request(**kwargs: Any) -> dict[str, Any] | None:
+    """Generate or deliver a complete-request bounded candidate.
+
+    The middleware is inactive in legacy mode. Shadow mode records the exact
+    full-versus-candidate request comparison without changing delivery.
+    Bounded mode additionally requires an explicit task/objective allowlist,
+    complete mechanical preservation, and a smaller candidate.
+    """
+    mode = _complete_context_mode()
+    if mode == "legacy":
+        return None
+    request = kwargs.get("request")
+    if not isinstance(request, dict):
+        return None
+
+    full_request = deepcopy(request)
+    candidate, mechanically_complete, missing, replaced = (
+        _duplicate_tool_output_candidate(full_request)
+    )
+    full_tokens = _estimated_tokens(full_request)
+    bounded_tokens = _estimated_tokens(candidate)
+    _, messages = _provider_messages(full_request)
+    allowlisted = _bounded_delivery_allowlisted(messages)
+    smaller = bounded_tokens < full_tokens
+    delivered = (
+        "bounded"
+        if mode == "bounded" and allowlisted and mechanically_complete and smaller
+        else "full"
+    )
+    fallback_reason = None
+    if mode == "shadow":
+        fallback_reason = "shadow_only"
+    elif not allowlisted:
+        fallback_reason = "not_allowlisted"
+    elif not mechanically_complete:
+        fallback_reason = "incomplete_candidate"
+    elif not smaller:
+        fallback_reason = "candidate_not_smaller"
+
+    session_id = str(kwargs.get("session_id") or "")
+    with _LOCK:
+        totals = _SESSIONS.setdefault(session_id, _SessionTotals())
+        totals.complete_prompt_matched_calls += 1
+        totals.complete_prompt_full_tokens += full_tokens
+        totals.complete_prompt_bounded_tokens += bounded_tokens
+        if mode == "bounded" and delivered != "bounded":
+            totals.complete_prompt_fallback_count += 1
+        if delivered == "bounded":
+            totals.complete_prompt_bounded_delivery_count += 1
+
+    _write({
+        "version": SCHEMA_VERSION,
+        "event": "complete_prompt_comparison",
+        "recordedAt": time.time(),
+        "sessionId": session_id,
+        "taskId": str(kwargs.get("task_id") or ""),
+        "apiRequestId": str(kwargs.get("api_request_id") or ""),
+        "mode": mode,
+        "deliveredContext": delivered,
+        "mechanicallyComplete": mechanically_complete,
+        "missingCategories": missing,
+        "fullEstimatedTokens": full_tokens,
+        "boundedEstimatedTokens": bounded_tokens,
+        "duplicateToolOutputsCompacted": replaced,
+        "fallbackReason": fallback_reason,
+    })
+
+    if delivered != "bounded":
+        return None
+    return {
+        "request": candidate,
+        "source": "mc-context-efficiency",
+        "reason": "allowlisted exact-duplicate tool-output compaction",
+    }
 
 
 def on_pre_api_request(**kwargs: Any) -> None:
@@ -345,10 +578,19 @@ def on_session_finalize(**kwargs: Any) -> None:
         "repeatedToolCalls": totals.repeated_tool_calls,
         "taskIds": sorted(totals.task_ids),
         "guardrails": guardrails,
+        "completePromptComparison": {
+            "matchedCallCount": totals.complete_prompt_matched_calls,
+            "fullEstimatedTokens": totals.complete_prompt_full_tokens,
+            "boundedEstimatedTokens": totals.complete_prompt_bounded_tokens,
+            "fallbackCount": totals.complete_prompt_fallback_count,
+            "boundedDeliveryCount": totals.complete_prompt_bounded_delivery_count,
+            "measurementSource": "provider_request",
+        },
     })
 
 
 def register(ctx: Any) -> None:
+    ctx.register_middleware("llm_request", on_llm_request)
     ctx.register_hook("pre_api_request", on_pre_api_request)
     ctx.register_hook("post_api_request", on_post_api_request)
     ctx.register_hook("api_request_error", on_api_request_error)

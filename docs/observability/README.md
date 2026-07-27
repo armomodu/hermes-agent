@@ -10,6 +10,14 @@ events, correlation IDs, sanitized payloads, timing, status, and error fields.
 They do not replace Hermes' planner, model providers, memory, tool registry,
 approval UX, CLI, gateway behavior, or execution semantics.
 
+The bundled `mc-context-efficiency` plugin combines this read-only contract
+with the separately versioned request-middleware contract. Its observer side
+records content-free complete-request/session metrics. Its middleware side is
+inert in `legacy`, measurement-only in `shadow`, and can deliver only an
+explicitly allowlisted, smaller candidate in `bounded`. That candidate replaces
+only earlier byte-identical large tool output while retaining the latest exact
+copy; every unique message and unknown request field remains unchanged.
+
 Behavior-changing request or execution wrappers are outside this observer
 contract. Observer hooks should report what happened; they should not replace
 provider requests, tool arguments, or execution callbacks.

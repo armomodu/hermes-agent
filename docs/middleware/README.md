@@ -118,6 +118,21 @@ Middleware only runs for enabled plugins. For a bundled plugin:
 hermes plugins enable <plugin-name>
 ```
 
+`mc-context-efficiency` uses `llm_request` middleware as an upgrade-safe
+compatibility layer. `HERMES_CONTEXT_MODE=shadow` computes an exact
+full-versus-bounded provider-request comparison without mutation.
+`HERMES_CONTEXT_MODE=bounded` additionally requires
+`HERMES_CONTEXT_TASK_IDS` or `HERMES_CONTEXT_OBJECTIVE_IDS`; otherwise the full
+request is delivered. Only earlier exact duplicate large tool output is
+eligible, and any error, incomplete candidate, or non-smaller candidate falls
+back to the full request.
+
+Profile gateways may persist the same values in
+`$HERMES_HOME/context-efficiency.json` using version
+`mc-context-efficiency-settings.v1` and fields `mode`, `taskIds`, and
+`objectiveIds`. Environment variables override that file. The profile file
+survives gateway service regeneration and Hermes upgrades.
+
 For isolated local testing, use one `HERMES_HOME` for plugin enablement and the
 agent run:
 
