@@ -22,7 +22,7 @@ SCHEMA_VERSION = "mc-context-efficiency.v1"
 _LOCK = threading.RLock()
 _SESSIONS: dict[str, "_SessionTotals"] = {}
 _MC_TASK_ID_PATTERN = re.compile(
-    r"(?m)^\s*MC Task ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$",
+    r"(?m)^\s*(?:MC )?Task ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$",
     re.IGNORECASE,
 )
 
@@ -96,6 +96,7 @@ def _message_text(message: dict[str, Any]) -> str:
 def _is_task_envelope(text: str) -> bool:
     markers = (
         "MC Task ID:",
+        "Task ID:",
         "MC Task Type:",
         "MC Completion Contract:",
         "Objective ID:",
