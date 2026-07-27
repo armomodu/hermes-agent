@@ -901,11 +901,14 @@ def test_oneshot_wires_session_db_for_recall(monkeypatch):
     from hermes_cli.oneshot import _run_agent
 
     captured = {}
+    hook_calls = []
     sentinel_db = object()
 
     class FakeAgent:
         def __init__(self, **kwargs):
             captured.update(kwargs)
+            self.session_id = "oneshot-session"
+            self.platform = "cli"
             self.suppress_status_output = False
             self.stream_delta_callback = object()
             self.tool_gen_callback = object()
@@ -913,6 +916,9 @@ def test_oneshot_wires_session_db_for_recall(monkeypatch):
         def run_conversation(self, prompt, **_kwargs):
             captured["prompt"] = prompt
             return {"final_response": "ok", "failed": False, "partial": False}
+
+        def close(self):
+            captured["closed"] = True
 
     class FakeSessionDB:
         def __new__(cls):
@@ -955,6 +961,10 @@ def test_oneshot_wires_session_db_for_recall(monkeypatch):
         "hermes_cli.tools_config",
         mod("hermes_cli.tools_config", _get_platform_tools=lambda *_args, **_kwargs: {"session_search"}),
     )
+    monkeypatch.setattr(
+        "hermes_cli.plugins.invoke_hook",
+        lambda hook, **kwargs: hook_calls.append((hook, kwargs)),
+    )
 
     text, result = _run_agent("recall this")
     assert text == "ok"
@@ -962,6 +972,15 @@ def test_oneshot_wires_session_db_for_recall(monkeypatch):
     assert captured["session_db"] is sentinel_db
     assert captured["enabled_toolsets"] == ["session_search"]
     assert captured["prompt"] == "recall this"
+    assert captured["closed"] is True
+    assert hook_calls == [(
+        "on_session_finalize",
+        {
+            "session_id": "oneshot-session",
+            "platform": "cli",
+            "reason": "oneshot_complete",
+        },
+    )]
 
 
 def test_launch_tui_exports_model_provider_and_toolsets(monkeypatch, main_mod):

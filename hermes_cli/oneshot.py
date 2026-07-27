@@ -417,8 +417,32 @@ def _run_agent(
     agent.stream_delta_callback = None
     agent.tool_gen_callback = None
 
-    result = agent.run_conversation(prompt)
-    return (result.get("final_response") or "", result)
+    result: dict = {}
+    try:
+        result = agent.run_conversation(prompt)
+        return (result.get("final_response") or "", result)
+    finally:
+        # One-shot is also the Kanban execution substrate. It bypasses cli.py,
+        # so it must finalize plugin telemetry and its owned session directly.
+        try:
+            from hermes_cli.plugins import invoke_hook
+
+            invoke_hook(
+                "on_session_finalize",
+                session_id=getattr(agent, "session_id", None),
+                platform=getattr(agent, "platform", None) or "cli",
+                reason=(
+                    "oneshot_complete"
+                    if result and not result.get("failed") and not result.get("partial")
+                    else "oneshot_failed"
+                ),
+            )
+        except Exception:
+            pass
+        try:
+            agent.close()
+        except Exception:
+            pass
 
 
 def _oneshot_clarify_callback(question: str, choices=None) -> str:
