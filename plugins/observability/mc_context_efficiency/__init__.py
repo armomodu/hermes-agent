@@ -106,11 +106,29 @@ def _is_task_envelope(text: str) -> bool:
 
 
 def _mc_task_ids(messages: list[dict[str, Any]]) -> set[str]:
-    return {
-        match.group(1).lower()
-        for message in messages
-        for match in _MC_TASK_ID_PATTERN.finditer(_message_text(message))
-    }
+    task_ids: set[str] = set()
+
+    def collect(value: Any) -> None:
+        if isinstance(value, str):
+            task_ids.update(match.group(1).lower() for match in _MC_TASK_ID_PATTERN.finditer(value))
+            try:
+                decoded = json.loads(value)
+            except (TypeError, ValueError):
+                return
+            if decoded != value:
+                collect(decoded)
+            return
+        if isinstance(value, dict):
+            for item in value.values():
+                collect(item)
+            return
+        if isinstance(value, list):
+            for item in value:
+                collect(item)
+
+    for message in messages:
+        collect(_message_text(message))
+    return task_ids
 
 
 def _tool_signatures(messages: list[dict[str, Any]]) -> Counter[str]:

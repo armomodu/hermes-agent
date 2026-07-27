@@ -130,6 +130,37 @@ def test_correlates_mission_control_bounded_envelope_task_id(tmp_path, monkeypat
     assert records[-1]["taskIds"] == [mc_task_id, "internal-turn-id"]
 
 
+def test_correlates_json_wrapped_kanban_task_body(tmp_path, monkeypatch):
+    plugin = _load_plugin()
+    output = tmp_path / "context.jsonl"
+    monkeypatch.setenv("HERMES_CONTEXT_TELEMETRY_PATH", str(output))
+    mc_task_id = "1e8cf388-89b3-59be-84ba-cab230c1bbca"
+    tool_result = json.dumps(
+        {
+            "task": {
+                "id": "t_c688c25a",
+                "body": (
+                    "Mission Control bounded context candidate (shadow only)\n\n"
+                    f"Task ID: {mc_task_id}\n\n"
+                    "Completion Contract: execution_result"
+                ),
+            },
+        },
+    )
+
+    plugin.on_pre_api_request(
+        session_id="session-kanban",
+        task_id="internal-turn-id",
+        api_call_count=1,
+        request={"body": {"messages": [{"role": "tool", "content": tool_result}]}},
+    )
+    plugin.on_session_finalize(session_id="session-kanban", reason="done")
+
+    records = [json.loads(line) for line in output.read_text().splitlines()]
+    assert records[0]["categories"]["task_context"] > 0
+    assert records[-1]["taskIds"] == [mc_task_id, "internal-turn-id"]
+
+
 def test_telemetry_failure_never_escapes(monkeypatch):
     plugin = _load_plugin()
     monkeypatch.setattr(plugin, "_output_path", lambda: Path("/dev/null/not-writable"))
