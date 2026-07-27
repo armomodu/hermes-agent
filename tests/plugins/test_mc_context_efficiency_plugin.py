@@ -68,6 +68,36 @@ def test_records_complete_content_free_request_breakdown(tmp_path, monkeypatch):
     assert "large output" not in output.read_text()
 
 
+def test_correlates_explicit_mc_task_id_and_classifies_tool_envelope(tmp_path, monkeypatch):
+    plugin = _load_plugin()
+    output = tmp_path / "context.jsonl"
+    monkeypatch.setenv("HERMES_CONTEXT_TELEMETRY_PATH", str(output))
+    mc_task_id = "000d205e-5dc9-5eb1-95f2-8bcad1cac23e"
+
+    plugin.on_pre_api_request(
+        session_id="session-mc",
+        task_id="internal-turn-id",
+        api_call_count=1,
+        request={
+            "body": {
+                "messages": [
+                    {"role": "system", "content": "system guidance"},
+                    {
+                        "role": "tool",
+                        "content": f"MC Task ID: {mc_task_id}\nMC Completion Contract: execution_result",
+                    },
+                ],
+            },
+        },
+    )
+    plugin.on_session_finalize(session_id="session-mc", reason="done")
+
+    records = [json.loads(line) for line in output.read_text().splitlines()]
+    assert records[0]["categories"]["task_context"] > 0
+    assert records[0]["categories"]["tool_results"] == 1
+    assert records[-1]["taskIds"] == [mc_task_id, "internal-turn-id"]
+
+
 def test_telemetry_failure_never_escapes(monkeypatch):
     plugin = _load_plugin()
     monkeypatch.setattr(plugin, "_output_path", lambda: Path("/dev/null/not-writable"))

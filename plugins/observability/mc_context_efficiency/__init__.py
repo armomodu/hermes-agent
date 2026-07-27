@@ -12,6 +12,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import re
 import threading
 import time
 from typing import Any
@@ -20,6 +21,10 @@ from typing import Any
 SCHEMA_VERSION = "mc-context-efficiency.v1"
 _LOCK = threading.RLock()
 _SESSIONS: dict[str, "_SessionTotals"] = {}
+_MC_TASK_ID_PATTERN = re.compile(
+    r"(?m)^\s*MC Task ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$",
+    re.IGNORECASE,
+)
 
 
 def _estimated_tokens(value: Any) -> int:
@@ -99,6 +104,14 @@ def _is_task_envelope(text: str) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _mc_task_ids(messages: list[dict[str, Any]]) -> set[str]:
+    return {
+        match.group(1).lower()
+        for message in messages
+        for match in _MC_TASK_ID_PATTERN.finditer(_message_text(message))
+    }
+
+
 def _tool_signatures(messages: list[dict[str, Any]]) -> Counter[str]:
     signatures: Counter[str] = Counter()
     for message in messages:
@@ -126,12 +139,13 @@ def _breakdown(body: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, int]:
 
     for message in messages:
         role = str(message.get("role") or "")
-        if role in {"system", "developer"}:
+        text = _message_text(message)
+        if _is_task_envelope(text):
+            task_context.append(message)
+        elif role in {"system", "developer"}:
             system.append(message)
         elif role == "tool":
             tool_results.append(message)
-        elif role == "user" and _is_task_envelope(_message_text(message)):
-            task_context.append(message)
         else:
             conversation.append(message)
 
@@ -168,8 +182,9 @@ def on_pre_api_request(**kwargs: Any) -> None:
     session_id = str(kwargs.get("session_id") or "")
     request_id = str(kwargs.get("api_request_id") or "")
     body = _request_body(kwargs)
+    messages = _messages(body, kwargs)
     breakdown = _breakdown(body, kwargs)
-    signatures = _tool_signatures(_messages(body, kwargs))
+    signatures = _tool_signatures(messages)
     repeated = sum(count - 1 for count in signatures.values() if count > 1)
     estimated_total = sum(breakdown.values())
     approx_input = int(kwargs.get("approx_input_tokens") or 0)
@@ -179,6 +194,7 @@ def on_pre_api_request(**kwargs: Any) -> None:
         task_id = str(kwargs.get("task_id") or "")
         if task_id:
             totals.task_ids.add(task_id)
+        totals.task_ids.update(_mc_task_ids(messages))
         totals.api_calls = max(totals.api_calls, int(kwargs.get("api_call_count") or 0))
         prompt_tokens = max(approx_input, estimated_total)
         if totals.first_prompt_tokens == 0:
