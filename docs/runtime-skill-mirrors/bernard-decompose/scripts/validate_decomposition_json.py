@@ -194,6 +194,93 @@ def contract_without_additive_evidence(value: object) -> object:
     return contract
 
 
+def _task_started(task: dict) -> bool:
+    return (
+        task.get("status") not in (None, "pending", "ready")
+        or task.get("releasedToHermes") is True
+        or task.get("hermesDispatchStatus") not in (None, "not_released")
+    )
+
+
+def _safe_narrowing_contract(value: object) -> object:
+    contract = contract_without_additive_evidence(value)
+    if not isinstance(contract, dict):
+        return contract
+    narrowed = dict(contract)
+    narrowed.pop("executionPlan", None)
+    verification = narrowed.get("verification")
+    if isinstance(verification, dict):
+        narrowed["verification"] = {
+            key: item
+            for key, item in verification.items()
+            if key != "qualityGates"
+        }
+    return narrowed
+
+
+def _safe_read_only_plan_narrowing(baseline_task: dict, proposed_task: dict) -> bool:
+    baseline_contract = baseline_task.get("taskContract")
+    proposed_contract = proposed_task.get("taskContract")
+    if not isinstance(baseline_contract, dict) or not isinstance(proposed_contract, dict):
+        return baseline_contract == proposed_contract
+    baseline_plan = baseline_contract.get("executionPlan")
+    proposed_plan = proposed_contract.get("executionPlan")
+    is_gate = (
+        baseline_task.get("taskType") == "review"
+        and baseline_task.get("reviewMode") == "gate_review"
+    )
+    if not is_gate:
+        return baseline_plan == proposed_plan
+    if not isinstance(baseline_plan, dict) or not isinstance(proposed_plan, dict):
+        return baseline_plan == proposed_plan
+    baseline_without_apply = [
+        step
+        for step in baseline_plan.get("steps", [])
+        if isinstance(step, dict) and step.get("kind") != "apply_change"
+    ]
+    return (
+        baseline_plan.get("version") == proposed_plan.get("version")
+        and baseline_plan.get("outcome") == proposed_plan.get("outcome")
+        and baseline_plan.get("completionChecks") == proposed_plan.get("completionChecks")
+        and proposed_plan.get("expectedChanges") == []
+        and baseline_without_apply == proposed_plan.get("steps")
+    )
+
+
+def _is_safe_unreleased_narrowing(baseline_task: dict, proposed_task: dict) -> bool:
+    if _task_started(baseline_task):
+        return False
+    baseline_contract = baseline_task.get("taskContract")
+    proposed_contract = proposed_task.get("taskContract")
+    if (
+        _safe_narrowing_contract(baseline_contract)
+        != _safe_narrowing_contract(proposed_contract)
+        or not _safe_read_only_plan_narrowing(baseline_task, proposed_task)
+    ):
+        return False
+    baseline_verification = (
+        baseline_contract.get("verification")
+        if isinstance(baseline_contract, dict)
+        else {}
+    )
+    proposed_verification = (
+        proposed_contract.get("verification")
+        if isinstance(proposed_contract, dict)
+        else {}
+    )
+    baseline_gates = set(normalized_string_list(
+        baseline_verification.get("qualityGates")
+        if isinstance(baseline_verification, dict)
+        else []
+    ))
+    proposed_gates = set(normalized_string_list(
+        proposed_verification.get("qualityGates")
+        if isinstance(proposed_verification, dict)
+        else []
+    ))
+    return proposed_gates.issubset(baseline_gates)
+
+
 def fail(message: str) -> int:
     print(f"INVALID: {message}", file=sys.stderr)
     return 1
@@ -488,7 +575,11 @@ def collect_task_contract_local_findings(
         )
 
     steps = execution_plan.get("steps")
-    required_step_kinds = ["inspect_authority", "derive_delta", "apply_change", "verify"]
+    required_step_kinds = (
+        ["inspect_authority", "derive_delta", "verify"]
+        if allow_read_only
+        else ["inspect_authority", "derive_delta", "apply_change", "verify"]
+    )
     if not isinstance(steps, list):
         add("execution_plan_steps_invalid", f"taskContract.executionPlan.steps must be a list for {task_id}")
         steps = []
@@ -503,6 +594,11 @@ def collect_task_contract_local_findings(
         step_kinds.index(kind) for kind in required_step_kinds
     ):
         add("execution_plan_steps_out_of_order", f"taskContract.executionPlan steps are out of order for {task_id}")
+    if allow_read_only and "apply_change" in step_kinds:
+        add(
+            "read_only_execution_plan_applies_change",
+            f"read-only gate review executionPlan must not include apply_change for {task_id}",
+        )
     for index, step in enumerate(steps):
         if not isinstance(step, dict):
             add("execution_plan_step_invalid", f"taskContract.executionPlan.steps[{index}] must be an object for {task_id}")
@@ -526,7 +622,14 @@ def collect_task_contract_local_findings(
                 add("execution_plan_verify_reference_missing", f"taskContract.executionPlan verify must reference proofRoot for {task_id}")
 
     expected_changes = execution_plan.get("expectedChanges")
-    if not isinstance(expected_changes, list) or not expected_changes:
+    if allow_read_only:
+        if not isinstance(expected_changes, list) or expected_changes:
+            add(
+                "read_only_execution_plan_expected_changes",
+                f"read-only gate review executionPlan.expectedChanges must be empty for {task_id}",
+            )
+        expected_changes = []
+    elif not isinstance(expected_changes, list) or not expected_changes:
         add("execution_plan_expected_changes_missing", f"taskContract.executionPlan.expectedChanges is required for {task_id}")
         expected_changes = []
     if strict_plan:
@@ -1144,6 +1247,33 @@ def collect_contract_required_findings(
     else:
         integration = integration_tasks[0]
         integration_id = str(integration.get("id") or "")
+        integration_gates = normalized_string_list(
+            integration["taskContract"].get("verification", {}).get("qualityGates")
+        )
+        if "software_build" not in integration_gates:
+            findings.append(
+                _graph_finding(
+                    "quality_gate_build_ownership_invalid",
+                    "task",
+                    "final integration_proof must retain software_build",
+                    task_id=integration_id or None,
+                )
+            )
+        for task in valid_tasks:
+            if task is integration or not isinstance(task.get("taskContract"), dict):
+                continue
+            task_gates = normalized_string_list(
+                task["taskContract"].get("verification", {}).get("qualityGates")
+            )
+            if "software_build" in task_gates:
+                findings.append(
+                    _graph_finding(
+                        "quality_gate_build_ownership_invalid",
+                        "task",
+                        "software_build is owned only by the final integration_proof task",
+                        task_id=str(task.get("id") or "") or None,
+                    )
+                )
         integration_dependencies = set(normalized_string_list(integration.get("dependsOn")))
         missing_integration = sorted((execution_ids - {integration_id}) - integration_dependencies)
         if missing_integration:
@@ -1613,11 +1743,13 @@ def emit_contract_required_report(
                     contracts_match = (
                         contract_without_additive_evidence(baseline_contract)
                         == contract_without_additive_evidence(proposed_contract)
+                        or _is_safe_unreleased_narrowing(baseline_task, proposed)
                     )
                     finding_code = "amendment_incomplete_contract_changed"
                     message = (
-                        "incomplete amendment child may change only consumed evidence "
-                        f"and derived consumed-token references: {task_id}"
+                        "incomplete amendment child may change only consumed evidence, "
+                        "or safely remove quality gates/read-only apply steps before release: "
+                        f"{task_id}"
                     )
                 if not contracts_match:
                     findings.append(

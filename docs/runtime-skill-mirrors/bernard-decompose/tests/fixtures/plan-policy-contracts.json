@@ -1,0 +1,101 @@
+{
+  "validExecution": {
+    "version": "task-contract.v1",
+    "semanticHinge": "Persist one bounded workflow change",
+    "workflowFamily": "workflow",
+    "mutationRoot": "src/workflow.ts",
+    "authorityRoot": "src/workflow-authority.ts",
+    "proofRoot": "src/workflow.test.ts",
+    "acceptanceHinge": "The workflow change remains source-derived",
+    "writableFiles": ["src/workflow.ts"],
+    "proofFiles": ["src/workflow.test.ts"],
+    "readOnlyAnchors": [],
+    "createdFileGlobs": [],
+    "outputArtifacts": [],
+    "provides": [],
+    "consumes": [],
+    "verification": {
+      "focusedTests": ["src/workflow.test.ts"],
+      "qualityGates": ["software_test"]
+    },
+    "executionPlan": {
+      "version": "task-execution-plan.v1",
+      "outcome": "The workflow implementation matches its authority and focused proof",
+      "steps": [
+        {"kind": "inspect_authority", "instruction": "Inspect the live workflow authority.", "references": ["authorityRoot"]},
+        {"kind": "derive_delta", "instruction": "Derive the smallest implementation delta.", "references": ["authorityRoot", "mutationRoot"]},
+        {"kind": "apply_change", "instruction": "Apply only the bounded workflow change.", "references": ["mutationRoot"]},
+        {"kind": "verify", "instruction": "Run the focused workflow proof.", "references": ["proofRoot"]}
+      ],
+      "expectedChanges": [
+        {"target": "mutationRoot", "operation": "modify", "symbols": ["runWorkflow"], "invariant": "Existing workflow transitions remain unchanged."}
+      ],
+      "completionChecks": ["The focused workflow proof passes."]
+    }
+  },
+  "validReadOnlyReview": {
+    "version": "task-contract.v1",
+    "semanticHinge": "Review the integrated workflow result",
+    "workflowFamily": "workflow",
+    "mutationRoot": "src/workflow.ts",
+    "authorityRoot": "src/workflow-authority.ts",
+    "proofRoot": "src/workflow.test.ts",
+    "acceptanceHinge": "The review changes no implementation files",
+    "writableFiles": [],
+    "proofFiles": ["src/workflow.test.ts"],
+    "readOnlyAnchors": ["src/workflow-authority.ts"],
+    "createdFileGlobs": [],
+    "outputArtifacts": [],
+    "provides": [],
+    "consumes": [],
+    "verification": {
+      "focusedTests": ["src/workflow.test.ts"],
+      "qualityGates": ["software_test"]
+    },
+    "executionPlan": {
+      "version": "task-execution-plan.v1",
+      "outcome": "The gate independently verifies the integrated workflow result",
+      "steps": [
+        {"kind": "inspect_authority", "instruction": "Inspect the live workflow authority.", "references": ["authorityRoot"]},
+        {"kind": "derive_delta", "instruction": "Compare the integrated result with authority.", "references": ["authorityRoot", "mutationRoot"]},
+        {"kind": "verify", "instruction": "Run the focused workflow proof.", "references": ["proofRoot"]}
+      ],
+      "expectedChanges": [],
+      "completionChecks": ["The integrated workflow satisfies the objective contract."]
+    }
+  },
+  "invalidReadOnlyReview": {
+    "version": "task-contract.v1",
+    "semanticHinge": "Review the integrated workflow result",
+    "workflowFamily": "workflow",
+    "mutationRoot": "src/workflow.ts",
+    "authorityRoot": "src/workflow-authority.ts",
+    "proofRoot": "src/workflow.test.ts",
+    "acceptanceHinge": "The review changes no implementation files",
+    "writableFiles": [],
+    "proofFiles": ["src/workflow.test.ts"],
+    "readOnlyAnchors": ["src/workflow-authority.ts"],
+    "createdFileGlobs": [],
+    "outputArtifacts": [],
+    "provides": [],
+    "consumes": [],
+    "verification": {
+      "focusedTests": ["src/workflow.test.ts"],
+      "qualityGates": ["software_test"]
+    },
+    "executionPlan": {
+      "version": "task-execution-plan.v1",
+      "outcome": "The gate independently verifies the integrated workflow result",
+      "steps": [
+        {"kind": "inspect_authority", "instruction": "Inspect the live workflow authority.", "references": ["authorityRoot"]},
+        {"kind": "derive_delta", "instruction": "Compare the integrated result with authority.", "references": ["authorityRoot", "mutationRoot"]},
+        {"kind": "apply_change", "instruction": "Change the implementation during review.", "references": ["mutationRoot"]},
+        {"kind": "verify", "instruction": "Run the focused workflow proof.", "references": ["proofRoot"]}
+      ],
+      "expectedChanges": [
+        {"target": "mutationRoot", "operation": "modify", "symbols": ["runWorkflow"], "invariant": "Review must not mutate implementation."}
+      ],
+      "completionChecks": ["The integrated workflow satisfies the objective contract."]
+    }
+  }
+}

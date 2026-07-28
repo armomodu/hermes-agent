@@ -59,6 +59,12 @@ Each execution task declares:
 - an ordered `executionPlan`: inspect authority, derive delta, apply change, verify;
 - expected symbols/invariants and executable completion checks.
 
+Execution-plan policy is task-type specific:
+- execution and proof tasks use `inspect_authority → derive_delta → apply_change → verify`
+  with non-empty `expectedChanges`;
+- read-only `gate_review` tasks use `inspect_authority → derive_delta → verify`,
+  omit `apply_change`, and set `expectedChanges=[]`.
+
 Hard boundaries:
 - One task owns one independently mutable production root.
 - Exact existing files are enumerated. A recursive writable glob is only for genuinely new files.
@@ -82,6 +88,7 @@ Hard boundaries:
 - Generic proof tasks do not invent authority JSON. Only real authority extraction produces a named
   evidence artifact.
 - One final `integration_proof` depends on every preceding execution slice and consumes every token they provide.
+- Only the final `integration_proof` owns `software_build`; it must retain that gate.
 - One final read-only `gate_review` depends on all required execution work and declares no writable or created-file scope.
 Start from `requiredOwnershipPaths`. Assign each requirement to its one actual writable owner.
 Do not hide existing ownership behind a parent `/**` glob.
@@ -118,7 +125,10 @@ python3 scripts/build_contract_decomposition.py \
    For a live graph amendment only, copy each existing child's authoritative ID into
    `persistedTaskId` and copy its accepted live `taskContract` exactly; omit the ID only for a
    genuinely new slice so the builder derives a new stable ID. An incomplete downstream slice may
-   add only `dependsOn`, `consumes`, and builder-derived `consumedToken:` plan references.
+   add `dependsOn`, `consumes`, and builder-derived `consumedToken:` plan references. Before any
+   child is released, it may also remove quality gates or normalize a gate review to the read-only
+   plan above. Never add or broaden a quality gate during amendment. Started, released, reviewed,
+   completed, or phase-run-backed task contracts are immutable.
    Also set manifest `operation="amend"` and `decompositionContractPatch` to the smallest
    objective-contract update. The builder merges that patch with `--objective` and emits
    `requestReview=false`, `operation="amend"`, and the complete amended contract.

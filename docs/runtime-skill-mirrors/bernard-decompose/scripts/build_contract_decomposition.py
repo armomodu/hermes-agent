@@ -163,25 +163,40 @@ def require_string_list(value: object, field: str, task_key: str) -> list[str]:
     return [item.strip() for item in value]
 
 
-def build_execution_plan(contract: dict, plan: dict, task_key: str) -> dict:
+def build_execution_plan(
+    contract: dict,
+    plan: dict,
+    task_key: str,
+    *,
+    read_only: bool = False,
+) -> dict:
     consumes = require_string_list(contract.get("consumes", []), "contract.consumes", task_key)
     derive_references = ["authorityRoot", "mutationRoot"]
     derive_references.extend(f"consumedToken:{token}" for token in consumes)
-    return {
-        "version": "task-execution-plan.v1",
-        "outcome": require_text(plan.get("outcome"), "contract.plan.outcome", task_key),
-        "steps": [
-            {"kind": "inspect_authority", "instruction": require_text(plan.get("inspect"), "contract.plan.inspect", task_key), "references": ["authorityRoot"]},
-            {"kind": "derive_delta", "instruction": require_text(plan.get("derive"), "contract.plan.derive", task_key), "references": derive_references},
-            {"kind": "apply_change", "instruction": require_text(plan.get("apply"), "contract.plan.apply", task_key), "references": ["mutationRoot"]},
-            {"kind": "verify", "instruction": require_text(plan.get("verify"), "contract.plan.verify", task_key), "references": ["proofRoot"]},
-        ],
-        "expectedChanges": [{
+    steps = [
+        {"kind": "inspect_authority", "instruction": require_text(plan.get("inspect"), "contract.plan.inspect", task_key), "references": ["authorityRoot"]},
+        {"kind": "derive_delta", "instruction": require_text(plan.get("derive"), "contract.plan.derive", task_key), "references": derive_references},
+    ]
+    if not read_only:
+        steps.append(
+            {"kind": "apply_change", "instruction": require_text(plan.get("apply"), "contract.plan.apply", task_key), "references": ["mutationRoot"]}
+        )
+    steps.append(
+        {"kind": "verify", "instruction": require_text(plan.get("verify"), "contract.plan.verify", task_key), "references": ["proofRoot"]}
+    )
+    expected_changes = []
+    if not read_only:
+        expected_changes.append({
             "target": "mutationRoot",
             "operation": require_text(plan.get("operation"), "contract.plan.operation", task_key),
             "symbols": require_string_list(plan.get("symbols"), "contract.plan.symbols", task_key),
             "invariant": require_text(plan.get("invariant"), "contract.plan.invariant", task_key),
-        }],
+        })
+    return {
+        "version": "task-execution-plan.v1",
+        "outcome": require_text(plan.get("outcome"), "contract.plan.outcome", task_key),
+        "steps": steps,
+        "expectedChanges": expected_changes,
         "completionChecks": require_string_list(plan.get("completionChecks"), "contract.plan.completionChecks", task_key),
     }
 
@@ -281,7 +296,15 @@ def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
             plan = contract_input.get("plan")
             if not isinstance(plan, dict):
                 raise ValueError(f"contract.plan is required for {key}")
-            contract["executionPlan"] = build_execution_plan(contract, plan, key)
+            contract["executionPlan"] = build_execution_plan(
+                contract,
+                plan,
+                key,
+                read_only=(
+                    item.get("taskType") == "review"
+                    and item.get("reviewMode") == "gate_review"
+                ),
+            )
         dependency_keys = require_string_list(item.get("dependsOn", []), "dependsOn", key)
         unknown = [dependency for dependency in dependency_keys if dependency not in ids]
         if unknown:
