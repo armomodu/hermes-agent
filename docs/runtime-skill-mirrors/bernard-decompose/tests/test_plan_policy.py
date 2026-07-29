@@ -202,6 +202,80 @@ class PlanPolicyTest(unittest.TestCase):
             "code",
         )
 
+    def test_validator_counts_production_created_globs_in_mutation_clusters(self):
+        contract = {
+            **self.fixtures["validExecution"],
+            "mutationRoot": "apps/mission-control/src/components/knowledge/browse/",
+            "writableFiles": [
+                "apps/mission-control/src/components/knowledge/browse/record-list.tsx",
+            ],
+            "createdFileGlobs": [
+                "apps/mission-control/src/components/knowledge/browse/**",
+            ],
+        }
+        task = {
+            "id": "0d01d42e-f0b4-4d24-9ba1-ea9fb06f3038",
+            "title": "Create bounded browse components",
+            "nextAction": "Apply the bounded component change.",
+            "summary": "Own one component mutation family.",
+            "assignee": "William",
+            "priority": "P1",
+            "taskType": "execution",
+            "reviewMode": None,
+            "dependsOn": [],
+            "acceptanceCriteria": ["The component contract is complete."],
+            "constraints": ["Stay inside the declared mutation root."],
+            "relatedFiles": contract["writableFiles"],
+            "artifactPaths": [contract["authorityRoot"]],
+            "taskContract": contract,
+        }
+        findings = validator.collect_contract_required_findings(
+            {
+                "actor": "Bernard",
+                "kind": "decomposition_result",
+                "requestReview": True,
+                "tasks": [task],
+            },
+            max_tasks=14,
+            objective={
+                "decompositionContract": {
+                    "allowedExpansionZone": [
+                        "apps/mission-control/src/components/knowledge/browse/**",
+                    ],
+                },
+            },
+        )
+        self.assertIn(
+            "multiple_mutation_clusters",
+            {finding["code"] for finding in findings},
+        )
+
+        exact_contract = {
+            **contract,
+            "createdFileGlobs": contract["writableFiles"],
+        }
+        exact_task = {**task, "taskContract": exact_contract}
+        exact_findings = validator.collect_contract_required_findings(
+            {
+                "actor": "Bernard",
+                "kind": "decomposition_result",
+                "requestReview": True,
+                "tasks": [exact_task],
+            },
+            max_tasks=14,
+            objective={
+                "decompositionContract": {
+                    "allowedExpansionZone": [
+                        "apps/mission-control/src/components/knowledge/browse/**",
+                    ],
+                },
+            },
+        )
+        self.assertNotIn(
+            "multiple_mutation_clusters",
+            {finding["code"] for finding in exact_findings},
+        )
+
     def test_builder_preserves_special_proof_classes(self):
         contract = {
             "primaryArtifactClass": "integration_proof",

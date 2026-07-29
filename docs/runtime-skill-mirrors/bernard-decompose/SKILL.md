@@ -67,6 +67,8 @@ Hard boundaries:
 - `authorityRoot` must identify pre-existing external truth. It may never sit inside the task's own
   `createdFileGlobs`; integration proof must read authority provided by earlier slices.
 - Exact existing files are enumerated. A recursive writable glob is only for genuinely new files.
+- `createdFileGlobs` participate in the same mutation-cluster check as `writableFiles`; when exact
+  new files are known, enumerate them instead of pairing exact files with a broader directory glob.
 - Normal implementation tasks do not write proof files and use `proofFiles=[]`.
 - Documentation slices are normal implementation tasks for this rule; a writable document cannot
   prove itself.

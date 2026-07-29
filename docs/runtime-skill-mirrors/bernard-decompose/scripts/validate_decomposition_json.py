@@ -1134,10 +1134,23 @@ def collect_contract_required_findings(
                     paths=leaked_manifests,
                 )
             )
+        production_created_files = [
+            path
+            for path in created_files
+            if not (
+                _is_exact_file_path(path)
+                and proof_root
+                and _path_within_root(path, proof_root)
+                and path in proof_files
+            )
+        ]
         clusters = sorted(
             {
                 cluster
-                for cluster in (classify_writable_cluster(path) for path in writable_files)
+                for cluster in (
+                    classify_writable_cluster(path)
+                    for path in writable_files + production_created_files
+                )
                 if cluster
             }
         )
