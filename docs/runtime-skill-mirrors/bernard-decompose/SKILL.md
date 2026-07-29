@@ -90,6 +90,10 @@ Hard boundaries:
 - Shared interface, file adapter, hosted adapter, hybrid adapter, and export surfaces are separate
   owners when the objective requires them.
 - A consumed token has one provider and a dependency edge to that provider.
+- Consumer completeness is semantic: any page, composition, export, or wrapper that uses a sibling
+  output consumes its token and depends on its provider; final integration cannot replace that edge.
+- Documentation of newly implemented behavior consumes and depends on the bounded implementation
+  or proof owners it describes; authority anchors alone do not represent the new behavior.
 - Consume sibling outputs through tokens; never mass-reuse an unrelated generic authority or proof.
 - Generic proof tasks do not invent authority JSON. Only real authority extraction produces a named
   evidence artifact.
@@ -210,6 +214,7 @@ Before expansion, verify:
 - proof tasks own only their exact proof file;
 - authority roots are live, narrow, and not writable local truth;
 - evidence providers precede consumers;
+- every assembly and implementation-derived documentation task has direct consumer edges;
 - final integration proof consumes all required outputs;
 - gate review is last and read-only;
 - every required production evidence category has a token-bearing proof owner;

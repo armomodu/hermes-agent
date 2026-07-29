@@ -552,6 +552,11 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertIn("Do not read", skill)
         self.assertIn("implementation source during normal decomposition", skill)
         self.assertIn("complete_decomposition.py", skill)
+        self.assertIn("Consumer completeness is semantic", skill)
+        self.assertIn(
+            "Documentation of newly implemented behavior consumes and depends",
+            skill,
+        )
 
     def test_manifest_bootstrap_is_deterministic_and_slice_complete(self) -> None:
         objective = {
