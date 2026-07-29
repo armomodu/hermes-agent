@@ -164,6 +164,11 @@ def record_build(
         else []
     )
     full_regeneration = bool(previous_task_keys and task_keys and not preserved_task_keys)
+    if full_regeneration:
+        raise ValueError(
+            "decomposition replaced every stable task key for an unchanged objective; "
+            "edit the existing manifest in place instead of regenerating"
+        )
     metrics = dict(current.get("metrics") or {}) if same_objective else {}
     if previous_digest and previous_digest != manifest_digest:
         correction_round += 1

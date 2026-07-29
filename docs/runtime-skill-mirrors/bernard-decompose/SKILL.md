@@ -129,6 +129,9 @@ python3 scripts/build_contract_decomposition.py \
    The canonical manifest contains compact `contract.plan` instructions only. Never author, copy,
    or preserve `contract.executionPlan`; it is generated output owned exclusively by the builder.
 2. Give every slice a stable semantic `key`. Never change a key during correction.
+   The checkpoint rejects a correction that replaces every existing key for an unchanged objective;
+   edit the canonical manifest in place and preserve the task identities that remain semantically
+   valid.
    For a live graph amendment only, copy each existing child's authoritative ID into
    `persistedTaskId` and copy its accepted live `taskContract` exactly; omit the ID only for a
    genuinely new slice so the builder derives a new stable ID. An incomplete downstream slice may
