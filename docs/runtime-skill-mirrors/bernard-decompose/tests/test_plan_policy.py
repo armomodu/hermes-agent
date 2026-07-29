@@ -87,6 +87,20 @@ class PlanPolicyTest(unittest.TestCase):
             manifest["contractGuide"]["unassignedRequirements"],
             ["ownership:src/workflow.ts", "proof:0"],
         )
+        self.assertEqual(
+            manifest["contractGuide"]["specialTaskShapes"]["integrationProof"],
+            {
+                "taskType": "execution",
+                "primaryArtifactClass": "integration_proof",
+                "qualityGates": ["software_test", "software_build"],
+            },
+        )
+        self.assertEqual(
+            manifest["contractGuide"]["specialTaskShapes"]["gateReview"][
+                "reviewMode"
+            ],
+            "gate_review",
+        )
 
     def test_builder_uses_the_read_only_sequence(self):
         contract = self.fixtures["validReadOnlyReview"]
@@ -261,6 +275,53 @@ class PlanPolicyTest(unittest.TestCase):
             )
         }
         self.assertIn("implementation_owns_proof", codes)
+
+    def test_docs_readback_is_not_executable_proof_scope(self):
+        task_id = "docs-task"
+        docs_contract = {
+            **self.fixtures["validExecution"],
+            "primaryArtifactClass": "docs",
+            "mutationRoot": "docs/guide.md",
+            "proofRoot": "docs/guide.md",
+            "writableFiles": ["docs/guide.md"],
+            "proofFiles": [],
+            "createdFileGlobs": ["docs/guide.md"],
+            "verification": {"focusedTests": [], "qualityGates": []},
+        }
+        payload = {
+            "kind": "decomposition_result",
+            "actor": "Bernard",
+            "requestReview": True,
+            "tasks": [
+                {
+                    "id": task_id,
+                    "title": "Write docs",
+                    "assignee": "William",
+                    "taskType": "execution",
+                    "priority": "P1",
+                    "nextAction": "Write the guide",
+                    "dependsOn": [],
+                    "taskContract": docs_contract,
+                }
+            ],
+        }
+        findings = validator.collect_contract_required_findings(
+            payload,
+            max_tasks=2,
+            objective={
+                "decompositionContract": {
+                    "taskContractRequired": True,
+                    "allowedExpansionZone": ["docs/**"],
+                }
+            },
+        )
+        self.assertFalse(
+            any(
+                finding["code"] == "implementation_proof_scope_leak"
+                and finding.get("taskId") == task_id
+                for finding in findings
+            )
+        )
 
 
 if __name__ == "__main__":

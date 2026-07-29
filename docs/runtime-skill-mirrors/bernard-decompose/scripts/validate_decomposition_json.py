@@ -1012,6 +1012,11 @@ def collect_contract_required_findings(
         created_files = normalized_string_list(contract.get("createdFileGlobs"))
         mutation_root = str(contract.get("mutationRoot") or "").strip()
         proof_root = str(contract.get("proofRoot") or "").strip()
+        docs_slice = (
+            contract.get("primaryArtifactClass") == "docs"
+            or mutation_root.endswith((".md", ".mdx"))
+            or "/docs/" in mutation_root
+        )
         verification = contract.get("verification")
         quality_gates = (
             normalized_string_list(verification.get("qualityGates"))
@@ -1046,9 +1051,15 @@ def collect_contract_required_findings(
             )
         if task_type == "execution" and not proof_only:
             leaked_tests = [path for path in writable_files if "/__tests__/" in path]
-            leaked_proof_creations = [
-                path for path in created_files if proof_root and _path_within_root(path, proof_root)
-            ]
+            leaked_proof_creations = (
+                []
+                if docs_slice
+                else [
+                    path
+                    for path in created_files
+                    if proof_root and _path_within_root(path, proof_root)
+                ]
+            )
             if leaked_tests or leaked_proof_creations:
                 findings.append(
                     _graph_finding(

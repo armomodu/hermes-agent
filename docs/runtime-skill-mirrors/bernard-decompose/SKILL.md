@@ -153,6 +153,10 @@ python3 scripts/build_contract_decomposition.py \
    For Bernard-authored slices, copy `contractGuide.taskTemplate` for every task and replace every
    placeholder before the first build. Do not discover required fields by reading implementation
    source, searching old sessions, or repeatedly invoking the builder with incomplete tasks.
+   Apply `contractGuide.specialTaskShapes` exactly: integration proof remains task type `execution`
+   with artifact class `integration_proof`; gate review remains task type `review` with
+   `reviewMode=gate_review`; documentation uses artifact class `docs`, empty `proofFiles`, and its
+   mutation root as non-executable readback.
    Assign every `contractGuide.unassignedRequirements` entry exactly once. Plan `operation` is only
    `add`, `modify`, or `remove`; created paths remain equal to or below their exact mutation root.
 6. Expand and checkpoint:

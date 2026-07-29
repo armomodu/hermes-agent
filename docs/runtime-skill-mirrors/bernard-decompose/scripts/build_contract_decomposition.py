@@ -161,6 +161,24 @@ def initialize_manifest(objective: dict) -> dict:
             "sliceSource": "objective_approved" if approved_slices else "bernard_authored",
             "planOperations": ["add", "modify", "remove"],
             "taskTemplate": canonical_task_template(),
+            "specialTaskShapes": {
+                "documentation": {
+                    "taskType": "execution",
+                    "primaryArtifactClass": "docs",
+                    "proofRoot": "mutationRoot",
+                    "proofFiles": [],
+                },
+                "integrationProof": {
+                    "taskType": "execution",
+                    "primaryArtifactClass": "integration_proof",
+                    "qualityGates": ["software_test", "software_build"],
+                },
+                "gateReview": {
+                    "taskType": "review",
+                    "reviewMode": "gate_review",
+                    "primaryArtifactClass": "review_gate",
+                },
+            },
             "unassignedRequirements": [
                 *[
                     f"ownership:{path}"
