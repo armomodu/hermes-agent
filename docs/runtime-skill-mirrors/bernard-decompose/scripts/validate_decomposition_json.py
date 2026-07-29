@@ -452,6 +452,12 @@ def collect_task_contract_local_findings(
     created_file_globs = normalized_string_list(task_contract.get("createdFileGlobs"))
     proof_files = normalized_string_list(task_contract.get("proofFiles"))
     read_only_anchors = normalized_string_list(task_contract.get("readOnlyAnchors"))
+    if strict_graph and docs_slice and proof_files:
+        add(
+            "implementation_owns_proof",
+            f"documentation task must not declare proofFiles for {task_id}",
+            proof_files,
+        )
     if not writable_files and not allow_read_only:
         add("writable_files_missing", f"taskContract.writableFiles is required for executable task {task_id}")
     if (

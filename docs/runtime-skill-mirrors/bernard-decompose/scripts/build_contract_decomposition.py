@@ -348,6 +348,9 @@ def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
         if artifact_class is not None:
             contract["primaryArtifactClass"] = artifact_class
         contract["proofRoot"] = canonical_proof_root(contract, artifact_class)
+        if artifact_class == "docs":
+            contract["proofFiles"] = []
+            contract["verification"]["focusedTests"] = []
         plan = canonical_plan_input(contract_input, key)
         contract["executionPlan"] = build_execution_plan(
             contract,

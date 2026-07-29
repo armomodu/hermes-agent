@@ -207,6 +207,27 @@ class PlanPolicyTest(unittest.TestCase):
             "docs",
         )
 
+    def test_docs_contract_cannot_own_its_proof_file(self):
+        contract = {
+            **self.fixtures["validExecution"],
+            "primaryArtifactClass": "docs",
+            "mutationRoot": "docs/guide.md",
+            "proofRoot": "docs/guide.md",
+            "writableFiles": ["docs/guide.md"],
+            "proofFiles": ["docs/guide.md"],
+            "createdFileGlobs": ["docs/guide.md"],
+        }
+        codes = {
+            finding["code"]
+            for finding in validator.collect_task_contract_local_findings(
+                contract,
+                "docs",
+                strict_plan=True,
+                strict_graph=True,
+            )
+        }
+        self.assertIn("implementation_owns_proof", codes)
+
 
 if __name__ == "__main__":
     unittest.main()
