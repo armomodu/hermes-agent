@@ -71,6 +71,8 @@ Hard boundaries:
 - Normal implementation tasks do not write proof files and use `proofFiles=[]`.
 - Documentation slices are normal implementation tasks for this rule; a writable document cannot
   prove itself.
+- Documentation readback is the authored document itself: set `proofRoot=mutationRoot` and keep
+  `proofFiles=[]`; never invent a sibling `src/docs` proof path.
 - A task with `proofFiles=[]` must not request `software_test`. Put executable tests and that gate on a
   separate proof-only task, and keep every `focusedTests` path inside its declared `proofFiles`.
 - `verification.qualityGates` uses only `software_test`, `software_lint`, and `software_build`.

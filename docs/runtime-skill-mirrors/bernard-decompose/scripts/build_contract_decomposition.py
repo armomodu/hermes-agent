@@ -252,6 +252,10 @@ def canonical_plan_input(contract_input: dict, task_key: str) -> dict:
     return plan
 
 
+def canonical_proof_root(contract: dict, artifact_class: str | None) -> str:
+    return contract["mutationRoot"] if artifact_class == "docs" else contract["proofRoot"]
+
+
 def build_amended_contract(manifest: dict, objective: object | None) -> dict | None:
     operation = manifest.get("operation")
     if operation is None:
@@ -339,6 +343,7 @@ def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
         artifact_class = canonical_artifact_class(contract_input, key)
         if artifact_class is not None:
             contract["primaryArtifactClass"] = artifact_class
+        contract["proofRoot"] = canonical_proof_root(contract, artifact_class)
         plan = canonical_plan_input(contract_input, key)
         contract["executionPlan"] = build_execution_plan(
             contract,

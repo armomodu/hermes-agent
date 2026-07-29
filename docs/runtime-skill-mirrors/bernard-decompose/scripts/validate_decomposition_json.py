@@ -394,6 +394,18 @@ def collect_task_contract_local_findings(
     authority_root = roots["authorityRoot"]
     proof_root = roots["proofRoot"]
     mutation_root = roots["mutationRoot"]
+    if (
+        strict_graph
+        and task_contract.get("primaryArtifactClass") == "docs"
+        and mutation_root
+        and proof_root
+        and mutation_root != proof_root
+    ):
+        add(
+            "docs_proof_root_mismatch",
+            f"documentation task must verify mutationRoot for {task_id}: {proof_root} != {mutation_root}",
+            [proof_root, mutation_root],
+        )
     if strict_graph and authority_root and authority_root.replace("/**", "").rstrip("/") in GENERIC_AUTHORITY_ROOTS:
         add(
             "authority_root_too_broad",

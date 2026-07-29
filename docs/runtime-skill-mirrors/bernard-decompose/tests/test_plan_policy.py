@@ -168,6 +168,32 @@ class PlanPolicyTest(unittest.TestCase):
             "integration_proof",
         )
 
+    def test_validator_rejects_untruthful_docs_proof_root(self):
+        contract = {
+            **self.fixtures["validExecution"],
+            "primaryArtifactClass": "docs",
+            "mutationRoot": "docs/workflow.md",
+            "proofRoot": "src/docs/workflow.md",
+            "writableFiles": ["docs/workflow.md"],
+            "proofFiles": [],
+            "createdFileGlobs": ["docs/workflow.md"],
+            "verification": {"focusedTests": [], "qualityGates": []},
+        }
+        codes = {
+            finding["code"]
+            for finding in validator.collect_task_contract_local_findings(
+                contract,
+                "docs",
+                strict_plan=True,
+                strict_graph=True,
+            )
+        }
+        self.assertIn("docs_proof_root_mismatch", codes)
+        self.assertEqual(
+            builder.canonical_proof_root(contract, "docs"),
+            contract["mutationRoot"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
