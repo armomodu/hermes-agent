@@ -74,39 +74,26 @@ AUTHORITY_IMPACT_ROLES = {
 
 def classify_writable_cluster(path: str) -> str | None:
     cleaned = path.replace("**", "").rstrip("/")
-    if "/src/lib/knowledge-plane/contracts/" in cleaned:
-        return "contracts"
-    if "/src/lib/knowledge-plane/ledger/" in cleaned:
-        return "ledger"
-    if cleaned == "apps/mission-control/prisma/schema.prisma":
-        return "apps/mission-control/prisma/schema.prisma"
-    if cleaned.startswith("apps/mission-control/prisma/migrations"):
-        return "apps/mission-control/prisma/migrations"
-    if "/src/lib/storage/" in cleaned:
-        return "storage"
-    if cleaned.startswith("apps/mission-control/src/app/api/tasks"):
-        return "apps/mission-control/src/app/api/tasks"
-    if cleaned.startswith("apps/mission-control/src/app/api/objectives"):
-        return "apps/mission-control/src/app/api/objectives"
-    if cleaned == "apps/mission-control/src/lib/workers/handlers.ts":
-        return "apps/mission-control/src/lib/workers/handlers.ts"
-    if cleaned == "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts":
-        return "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts"
-    if "/src/app/api/knowledge/ledger/" in cleaned:
-        return "knowledge-ledger-api"
-    if "/src/lib/release/objective-release-service.ts" in cleaned:
-        return "release-runtime"
-    if "/src/lib/release/objective-deployment-service.ts" in cleaned:
-        return "deploy-verify-runtime"
-    if "/src/lib/release/objective-activation-service.ts" in cleaned:
-        return "activation-runtime"
-    if "/src/lib/workers/escalation-events.ts" in cleaned:
-        return "escalation-runtime"
-    if "/src/lib/workers/idempotency.ts" in cleaned:
-        return "duplicate-prevention-runtime"
-    if "/docs/" in cleaned:
-        return "docs"
-    return None
+    explicit_roots = [
+        "apps/mission-control/prisma/schema.prisma",
+        "apps/mission-control/prisma/migrations",
+        "apps/mission-control/src/app/api/tasks",
+        "apps/mission-control/src/app/api/objectives",
+        "apps/mission-control/src/lib/workers/handlers.ts",
+        "apps/mission-control/src/lib/workers/task-readiness-promotion-service.ts",
+        "apps/mission-control/src/lib/workers/objective-runtime-source-sync.ts",
+        "apps/mission-control/src/lib/release/objective-activation-service.ts",
+        "apps/mission-control/src/lib/storage",
+        "apps/mission-control/src/lib/decomposition",
+        "apps/mission-control/src/lib/knowledge-plane",
+        "apps/mission-control/docs",
+    ]
+    for root in explicit_roots:
+        if _path_within_root(cleaned, root):
+            return root
+    if "/" not in cleaned:
+        return cleaned or None
+    return cleaned.rsplit("/", 1)[0]
 
 
 def classify_authority_root(path: str) -> str | None:
@@ -1011,7 +998,20 @@ def collect_contract_required_findings(
         proof_files = normalized_string_list(contract.get("proofFiles"))
         created_files = normalized_string_list(contract.get("createdFileGlobs"))
         mutation_root = str(contract.get("mutationRoot") or "").strip()
+        authority_root = str(contract.get("authorityRoot") or "").strip()
         proof_root = str(contract.get("proofRoot") or "").strip()
+        if authority_root and any(
+            _path_within_root(authority_root, created_file) for created_file in created_files
+        ):
+            findings.append(
+                _graph_finding(
+                    "authority_root_created_by_task",
+                    "task",
+                    f"authorityRoot cannot be created by the same task for {task_id}: {authority_root}",
+                    task_id=task_id or None,
+                    paths=[authority_root],
+                )
+            )
         docs_slice = (
             contract.get("primaryArtifactClass") == "docs"
             or mutation_root.endswith((".md", ".mdx"))

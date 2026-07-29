@@ -146,7 +146,7 @@ def contract_required_payload() -> dict:
     integration["createdFileGlobs"] = [integration_file]
     integration["verification"] = {
         "focusedTests": [integration_file],
-        "qualityGates": ["software_test"],
+        "qualityGates": ["software_test", "software_build"],
     }
     integration["consumes"] = ["release-contract-v1", "release-proof-v1"]
 
@@ -156,6 +156,13 @@ def contract_required_payload() -> dict:
     review["proofFiles"] = [integration_file]
     review["primaryArtifactClass"] = "review_gate"
     review["consumes"] = []
+    review["verification"] = {"focusedTests": [], "qualityGates": []}
+    review["executionPlan"]["steps"] = [
+        step
+        for step in review["executionPlan"]["steps"]
+        if step["kind"] != "apply_change"
+    ]
+    review["executionPlan"]["expectedChanges"] = []
 
     return {
         "kind": "decomposition_result",
@@ -1135,7 +1142,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 plan["steps"][1]["references"],
             )
 
-    def test_compact_manifest_preserves_explicit_execution_plan(self) -> None:
+    def test_compact_manifest_rejects_explicit_execution_plan(self) -> None:
         manifest = compact_manifest()
         explicit_plan = copy.deepcopy(task_contract("apps/mission-control/src/lib/storage/types.ts")["executionPlan"])
         explicit_plan["outcome"] = "Preserve the authority-derived amendment plan exactly"
@@ -1155,11 +1162,10 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 text=True,
             )
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            payload = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(
-                payload["tasks"][0]["taskContract"]["executionPlan"],
-                explicit_plan,
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "executionPlan is generated output and must not appear",
+                result.stderr,
             )
 
     def test_manifest_amendment_preserves_authoritative_persisted_task_ids(self) -> None:
@@ -1670,6 +1676,12 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         review_contract["writableFiles"] = [
             "apps/mission-control/src/lib/knowledge-plane/__tests__/gate.test.ts"
         ]
+        review_contract["executionPlan"]["steps"] = [
+            step
+            for step in review_contract["executionPlan"]["steps"]
+            if step["kind"] != "apply_change"
+        ]
+        review_contract["executionPlan"]["expectedChanges"] = []
         payload = {
             "kind": "decomposition_result",
             "actor": "Bernard",
@@ -1787,6 +1799,40 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("multiple_mutation_clusters", result.stderr)
+
+    def test_contract_required_rejects_distinct_page_mutation_clusters(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        contract["mutationRoot"] = "apps/mission-control/src/app/knowledge"
+        contract["authorityRoot"] = "apps/mission-control/src/lib/knowledge-plane/read.ts"
+        contract["proofRoot"] = "apps/mission-control/src/lib/knowledge-plane/read.ts"
+        contract["writableFiles"] = [
+            "apps/mission-control/src/app/knowledge/page.tsx",
+            "apps/mission-control/src/app/knowledge/[recordId]/page.tsx",
+        ]
+        contract["createdFileGlobs"] = []
+        contract["readOnlyAnchors"] = [contract["authorityRoot"]]
+
+        result = self.run_validator(payload, "--contract-required")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("multiple_mutation_clusters", result.stderr)
+
+    def test_contract_required_rejects_authority_created_by_same_task(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        created_authority = "apps/mission-control/src/lib/knowledge-plane/canary/authority.json"
+        contract["mutationRoot"] = "apps/mission-control/src/lib/knowledge-plane/canary"
+        contract["authorityRoot"] = created_authority
+        contract["proofRoot"] = created_authority
+        contract["writableFiles"] = []
+        contract["createdFileGlobs"] = [created_authority]
+        contract["readOnlyAnchors"] = []
+
+        result = self.run_validator(payload, "--contract-required")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("authority_root_created_by_task", result.stderr)
 
     def test_production_contract_requires_evidence_coverage_and_independent_gate(self) -> None:
         payload = contract_required_payload()

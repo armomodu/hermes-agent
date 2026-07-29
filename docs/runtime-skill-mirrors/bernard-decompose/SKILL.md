@@ -32,14 +32,9 @@ files as authority when the live objective provides a contract.
 
 ### Authority Impact
 For a changed shared interface, write `authority-impact-request.json` with its path, exported
-symbols, and `changeKind="shared_interface"`, then collect candidates:
-
-```bash
-python3 scripts/collect_authority_impact.py \
-  --repo "$REPO_ROOT" \
-  --request authority-impact-request.json \
-  --output authority-impact.json
-```
+symbols, and `changeKind="shared_interface"`, then run `python3
+scripts/collect_authority_impact.py --repo "$REPO_ROOT" --request authority-impact-request.json
+--output authority-impact.json`.
 Confirm only necessary implementation/export/composition/persistence/API/integration roots, record
 them in manifest `authorityImpact.confirmedRoots` and `requiredOwnershipPaths`, and give each one
 owner. Search candidates are evidence, not automatic tasks. A shared interface requires a confirmed
@@ -67,6 +62,10 @@ Execution-plan policy is task-type specific:
 
 Hard boundaries:
 - One task owns one independently mutable production root.
+- Route list and dynamic-detail pages are separate mutation slices when their writable files have
+  different parent roots; do not combine them under a broad page-directory mutation root.
+- `authorityRoot` must identify pre-existing external truth. It may never sit inside the task's own
+  `createdFileGlobs`; integration proof must read authority provided by earlier slices.
 - Exact existing files are enumerated. A recursive writable glob is only for genuinely new files.
 - Normal implementation tasks do not write proof files and use `proofFiles=[]`.
 - Documentation slices are normal implementation tasks for this rule; a writable document cannot
@@ -109,16 +108,10 @@ semantic slices, the validator checks mechanics, and Mission Control remains fin
 ## Canonical Manifest Workflow
 Use this workflow for every contract-required graph:
 
-1. Fetch the governed objective through the bounded helper, then resume its checkpoint:
-```bash
-python3 scripts/fetch_objective.py <objective-id> objective.json
-python3 scripts/decomposition_checkpoint.py resume
-```
+1. Fetch the governed objective with `python3 scripts/fetch_objective.py <objective-id> objective.json`,
+   then run `python3 scripts/decomposition_checkpoint.py resume`.
    Reuse the checkpoint manifest when present. Otherwise immediately create the canonical skeleton:
-```bash
-python3 scripts/build_contract_decomposition.py \
-  --init-manifest objective.json manifest.json
-```
+   `python3 scripts/build_contract_decomposition.py --init-manifest objective.json manifest.json`
    The manifest must exist within five non-write tool calls after fetching the objective. Do not read
    builder, validator, checkpoint, or submitter implementation source during normal decomposition;
    their documented CLI and validator report are the complete operational interface. If bootstrap
@@ -159,21 +152,11 @@ python3 scripts/build_contract_decomposition.py \
    mutation root as non-executable readback.
    Assign every `contractGuide.unassignedRequirements` entry exactly once. Plan `operation` is only
    `add`, `modify`, or `remove`; created paths remain equal to or below their exact mutation root.
-6. Expand and checkpoint:
-```bash
-python3 scripts/build_contract_decomposition.py \
-  manifest.json decomposition.json --objective objective.json
-```
-
-7. Validate the whole graph and write one batch report:
-
-```bash
-python3 scripts/validate_decomposition_json.py \
-  --contract-required decomposition.json <maxTaskCount> \
-  --objective objective.json \
-  --manifest manifest.json \
-  --report decomposition-validator-report.json
-```
+6. Expand and checkpoint with `python3 scripts/build_contract_decomposition.py manifest.json
+   decomposition.json --objective objective.json`.
+7. Validate the whole graph with `python3 scripts/validate_decomposition_json.py
+   --contract-required decomposition.json <maxTaskCount> --objective objective.json --manifest
+   manifest.json --report decomposition-validator-report.json`.
 
 For a live amendment, also pass `--amend-baseline current-decomposition.json`. Only exact task-scoped
 findings already present on persisted children are reported as grandfathered. Graph findings and every
@@ -187,40 +170,22 @@ rejects stale completed contracts and non-evidence changes to incomplete contrac
    generated JSON and never regenerate the manifest.
 9. Complete within one initial draft plus at most two correction rounds. If still invalid, block with
    the final report.
-10. Before retrying after timeout, run:
-
-```bash
-python3 scripts/decomposition_checkpoint.py resume
-```
-
+10. Before retrying after timeout, run `python3 scripts/decomposition_checkpoint.py resume`.
 Resume the recorded manifest and correction round. The helper restores the workspace checkpoint from
 its in-progress journal when possible. If both copies are missing or invalid, continuity is blocked;
 do not reconstruct from memory.
-11. Submit the exact validated `decomposition.json` once through the bounded helper. It reads
+11. Submit the exact validated `decomposition.json` once with `python3
+   scripts/submit_decomposition.py decomposition.json --response decomposition-response.json`. It reads
    `MC_API_URL` and `CRON_SERVICE_TOKEN` from the environment, performs one authenticated JSON POST,
    identifies itself as the Hermes Mission Control service at the public edge, and avoids shell
    pipes or `curl --data-binary` patterns that trigger terminal approval:
 
-```bash
-python3 scripts/submit_decomposition.py \
-  decomposition.json \
-  --response decomposition-response.json
-```
-
 Do not replace this helper with ad hoc shell data plumbing. On an ambiguous timeout, read the live
 objective before deciding whether submission may be retried.
-12. On HTTP success, mark the checkpoint accepted:
-
-```bash
-python3 scripts/decomposition_checkpoint.py mark accepted
-```
-
-13. Complete only after `checkpointStatus="accepted"` with
-    `python3 scripts/complete_decomposition.py`; it verifies the checkpoint and exact result first.
-14. Report convergence metrics:
-```bash
-python3 scripts/decomposition_checkpoint.py metrics
-```
+12. On HTTP success, run `python3 scripts/decomposition_checkpoint.py mark accepted`.
+13. Complete only after `checkpointStatus="accepted"` with `python3
+    scripts/complete_decomposition.py`; it verifies the checkpoint and exact result first.
+14. Report convergence metrics with `python3 scripts/decomposition_checkpoint.py metrics`.
 
 15. Read the response. Stop on any rejection; report the exact finding rather than improvising a
    legacy or smaller graph.
@@ -253,12 +218,7 @@ For a marked `task_repair_result` card:
 2. Repair only the defect; one exact writable file requires that exact `mutationRoot`.
 4. Include a complete ordered `executionPlan`.
 5. Write the exact result to `task-repair-result.json`.
-6. Run:
-
-```bash
-python3 scripts/validate_decomposition_json.py --repair task-repair-result.json
-```
-
+6. Run `python3 scripts/validate_decomposition_json.py --repair task-repair-result.json`.
 7. Return the exact validated JSON. Mission Control performs full-graph validation.
 
 Never complete a marked repair card with prose, null output, or an unvalidated contract.
