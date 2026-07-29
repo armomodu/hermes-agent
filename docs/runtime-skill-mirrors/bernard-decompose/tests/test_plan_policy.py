@@ -75,6 +75,84 @@ class PlanPolicyTest(unittest.TestCase):
             ["inspect_authority", "derive_delta", "verify"],
         )
         self.assertEqual(built["expectedChanges"], [])
+        built_contract = {**contract, "executionPlan": built}
+        self.assertEqual(
+            validator.collect_task_contract_local_findings(
+                built_contract,
+                "gate",
+                strict_plan=True,
+                strict_graph=False,
+                allow_read_only=True,
+            ),
+            [],
+        )
+
+    def test_builder_output_passes_validator_for_execution(self):
+        contract = self.fixtures["validExecution"]
+        built = builder.build_execution_plan(
+            contract,
+            {
+                "outcome": "The workflow implementation matches its authority and focused proof",
+                "inspect": "Inspect the live workflow authority.",
+                "derive": "Derive the smallest implementation delta.",
+                "apply": "Apply only the bounded workflow change.",
+                "verify": "Run the focused workflow proof.",
+                "operation": "modify",
+                "symbols": ["runWorkflow"],
+                "invariant": "Existing workflow transitions remain unchanged.",
+                "completionChecks": ["The focused workflow proof passes."],
+            },
+            "execution",
+        )
+        built_contract = {**contract, "executionPlan": built}
+        self.assertEqual(
+            validator.collect_task_contract_local_findings(
+                built_contract,
+                "execution",
+                strict_plan=True,
+                strict_graph=False,
+                allow_read_only=False,
+            ),
+            [],
+        )
+
+    def test_builder_rejects_authored_execution_plan(self):
+        contract = {
+            "executionPlan": self.fixtures["validExecution"]["executionPlan"],
+        }
+        with self.assertRaisesRegex(
+            ValueError,
+            "executionPlan is generated output",
+        ):
+            builder.canonical_plan_input(contract, "legacy-plan")
+
+    def test_builder_canonicalizes_exact_proof_only_slice(self):
+        contract = {
+            "primaryArtifactClass": "code",
+            "mutationRoot": "src/lib/example.test.ts",
+            "proofRoot": "src/lib/example.test.ts",
+            "writableFiles": ["src/lib/example.test.ts"],
+            "proofFiles": ["src/lib/example.test.ts"],
+            "createdFileGlobs": ["src/lib/example.test.ts"],
+        }
+        self.assertEqual(
+            builder.canonical_artifact_class(contract, "proof"),
+            "proof",
+        )
+
+    def test_builder_does_not_reclassify_implementation(self):
+        contract = {
+            "primaryArtifactClass": "code",
+            "mutationRoot": "src/lib/example.ts",
+            "proofRoot": "src/lib/example.test.ts",
+            "writableFiles": ["src/lib/example.ts"],
+            "proofFiles": [],
+            "createdFileGlobs": [],
+        }
+        self.assertEqual(
+            builder.canonical_artifact_class(contract, "implementation"),
+            "code",
+        )
 
 
 if __name__ == "__main__":

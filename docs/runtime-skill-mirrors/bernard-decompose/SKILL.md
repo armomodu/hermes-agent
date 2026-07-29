@@ -77,6 +77,9 @@ Hard boundaries:
   Do not invent aliases such as `mission_control_build`; the validator rejects unknown gate names.
 - New or changed proof belongs to a proof-only task whose mutation and proof root are the exact proof
   file.
+- Proof-only slices keep `writableFiles` equal to `proofFiles`, keep `createdFileGlobs` inside that
+  exact proof set, and use the same exact `mutationRoot` and `proofRoot`. The builder canonicalizes
+  this mechanical shape to `primaryArtifactClass=proof`.
 - `readOnlyAnchors` never overlap writable or created scope. An exact preserve-only file may be a
   sibling of the primary `authorityRoot` when it is necessary to retain canonical implementation
   semantics; directory and glob expansion outside the primary authority root remain forbidden.
@@ -121,6 +124,8 @@ python3 scripts/build_contract_decomposition.py \
    `sliceSource=bernard_authored` means add stable semantic tasks without `slice:N`; `objective_approved` means keep generated tasks and their `slice:N`.
    If the objective exposes `lastDecompositionCandidate` and lint errors, preserve its task IDs and
    slices in this same manifest and correct only reported findings.
+   The canonical manifest contains compact `contract.plan` instructions only. Never author, copy,
+   or preserve `contract.executionPlan`; it is generated output owned exclusively by the builder.
 2. Give every slice a stable semantic `key`. Never change a key during correction.
    For a live graph amendment only, copy each existing child's authoritative ID into
    `persistedTaskId` and copy its accepted live `taskContract` exactly; omit the ID only for a

@@ -201,6 +201,52 @@ def build_execution_plan(
     }
 
 
+def canonical_artifact_class(contract_input: dict, task_key: str) -> str | None:
+    artifact_class = (
+        require_text(
+            contract_input["primaryArtifactClass"],
+            "contract.primaryArtifactClass",
+            task_key,
+        )
+        if "primaryArtifactClass" in contract_input
+        else None
+    )
+    writable_files = require_string_list(
+        contract_input.get("writableFiles", []),
+        "contract.writableFiles",
+        task_key,
+    )
+    proof_files = require_string_list(
+        contract_input.get("proofFiles", []),
+        "contract.proofFiles",
+        task_key,
+    )
+    created_files = require_string_list(
+        contract_input.get("createdFileGlobs", []),
+        "contract.createdFileGlobs",
+        task_key,
+    )
+    proof_only = (
+        bool(proof_files)
+        and set(writable_files) == set(proof_files)
+        and set(created_files).issubset(set(proof_files))
+        and contract_input.get("mutationRoot") == contract_input.get("proofRoot")
+    )
+    return "proof" if proof_only else artifact_class
+
+
+def canonical_plan_input(contract_input: dict, task_key: str) -> dict:
+    if "executionPlan" in contract_input:
+        raise ValueError(
+            f"contract.executionPlan is generated output and must not appear in canonical manifest for {task_key}; "
+            "author contract.plan instead"
+        )
+    plan = contract_input.get("plan")
+    if not isinstance(plan, dict):
+        raise ValueError(f"contract.plan is required for {task_key}")
+    return plan
+
+
 def build_amended_contract(manifest: dict, objective: object | None) -> dict | None:
     operation = manifest.get("operation")
     if operation is None:
@@ -285,26 +331,19 @@ def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
                     key,
                 ),
             })
-        if "primaryArtifactClass" in contract_input:
-            contract["primaryArtifactClass"] = require_text(contract_input["primaryArtifactClass"], "contract.primaryArtifactClass", key)
-        execution_plan = contract_input.get("executionPlan")
-        if execution_plan is not None:
-            if not isinstance(execution_plan, dict):
-                raise ValueError(f"contract.executionPlan must be an object for {key}")
-            contract["executionPlan"] = execution_plan
-        else:
-            plan = contract_input.get("plan")
-            if not isinstance(plan, dict):
-                raise ValueError(f"contract.plan is required for {key}")
-            contract["executionPlan"] = build_execution_plan(
-                contract,
-                plan,
-                key,
-                read_only=(
-                    item.get("taskType") == "review"
-                    and item.get("reviewMode") == "gate_review"
-                ),
-            )
+        artifact_class = canonical_artifact_class(contract_input, key)
+        if artifact_class is not None:
+            contract["primaryArtifactClass"] = artifact_class
+        plan = canonical_plan_input(contract_input, key)
+        contract["executionPlan"] = build_execution_plan(
+            contract,
+            plan,
+            key,
+            read_only=(
+                item.get("taskType") == "review"
+                and item.get("reviewMode") == "gate_review"
+            ),
+        )
         dependency_keys = require_string_list(item.get("dependsOn", []), "dependsOn", key)
         unknown = [dependency for dependency in dependency_keys if dependency not in ids]
         if unknown:
