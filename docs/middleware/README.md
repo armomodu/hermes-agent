@@ -123,9 +123,12 @@ compatibility layer. `HERMES_CONTEXT_MODE=shadow` computes an exact
 full-versus-bounded provider-request comparison without mutation.
 `HERMES_CONTEXT_MODE=bounded` additionally requires
 `HERMES_CONTEXT_TASK_IDS` or `HERMES_CONTEXT_OBJECTIVE_IDS`; otherwise the full
-request is delivered. Only earlier exact duplicate large tool output is
-eligible, and any error, incomplete candidate, or non-smaller candidate falls
-back to the full request.
+request is delivered. The Mission Control-owned user plugin may project
+administrative task metadata, profile-irrelevant skill discovery, completed
+full-file write arguments, and superseded read/command results after a
+protected recent tail. It retains the canonical task body and newest evidence.
+Any error, incomplete candidate, or non-smaller candidate falls back to the
+full request.
 
 Profile gateways may persist the same values in
 `$HERMES_HOME/context-efficiency.json` using version
