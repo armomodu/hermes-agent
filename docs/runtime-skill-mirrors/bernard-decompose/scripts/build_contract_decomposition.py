@@ -232,7 +232,12 @@ def canonical_artifact_class(contract_input: dict, task_key: str) -> str | None:
         and set(created_files).issubset(set(proof_files))
         and contract_input.get("mutationRoot") == contract_input.get("proofRoot")
     )
-    return "proof" if proof_only else artifact_class
+    generic_implementation_classes = {None, "code", "implementation", "writer"}
+    return (
+        "proof"
+        if proof_only and artifact_class in generic_implementation_classes
+        else artifact_class
+    )
 
 
 def canonical_plan_input(contract_input: dict, task_key: str) -> dict:

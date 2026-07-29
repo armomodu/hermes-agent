@@ -154,6 +154,20 @@ class PlanPolicyTest(unittest.TestCase):
             "code",
         )
 
+    def test_builder_preserves_special_proof_classes(self):
+        contract = {
+            "primaryArtifactClass": "integration_proof",
+            "mutationRoot": "src/lib/integration.test.ts",
+            "proofRoot": "src/lib/integration.test.ts",
+            "writableFiles": ["src/lib/integration.test.ts"],
+            "proofFiles": ["src/lib/integration.test.ts"],
+            "createdFileGlobs": ["src/lib/integration.test.ts"],
+        }
+        self.assertEqual(
+            builder.canonical_artifact_class(contract, "integration"),
+            "integration_proof",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
