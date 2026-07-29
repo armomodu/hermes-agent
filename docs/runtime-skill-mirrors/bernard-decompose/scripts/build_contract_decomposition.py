@@ -226,6 +226,10 @@ def canonical_artifact_class(contract_input: dict, task_key: str) -> str | None:
         "contract.createdFileGlobs",
         task_key,
     )
+    mutation_root = str(contract_input.get("mutationRoot") or "").strip()
+    docs_slice = mutation_root.endswith((".md", ".mdx")) or "/docs/" in mutation_root
+    if docs_slice:
+        return "docs"
     proof_only = (
         bool(proof_files)
         and set(writable_files) == set(proof_files)

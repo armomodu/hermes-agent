@@ -194,6 +194,19 @@ class PlanPolicyTest(unittest.TestCase):
             contract["mutationRoot"],
         )
 
+    def test_builder_infers_docs_from_markdown_mutation_root(self):
+        contract = {
+            "mutationRoot": "apps/mission-control/docs/knowledge-plane/guide.md",
+            "proofRoot": "apps/mission-control/src/lib/storage/types.ts",
+            "writableFiles": ["apps/mission-control/docs/knowledge-plane/guide.md"],
+            "proofFiles": [],
+            "createdFileGlobs": ["apps/mission-control/docs/knowledge-plane/guide.md"],
+        }
+        self.assertEqual(
+            builder.canonical_artifact_class(contract, "docs"),
+            "docs",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

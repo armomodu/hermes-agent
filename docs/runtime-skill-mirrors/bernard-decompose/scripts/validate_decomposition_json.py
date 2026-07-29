@@ -394,9 +394,14 @@ def collect_task_contract_local_findings(
     authority_root = roots["authorityRoot"]
     proof_root = roots["proofRoot"]
     mutation_root = roots["mutationRoot"]
+    docs_slice = (
+        task_contract.get("primaryArtifactClass") == "docs"
+        or mutation_root.endswith((".md", ".mdx"))
+        or "/docs/" in mutation_root
+    )
     if (
         strict_graph
-        and task_contract.get("primaryArtifactClass") == "docs"
+        and docs_slice
         and mutation_root
         and proof_root
         and mutation_root != proof_root
