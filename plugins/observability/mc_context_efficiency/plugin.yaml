@@ -1,9 +1,0 @@
-name: mc-context-efficiency
-version: "1.1.0"
-description: "Mission Control context-efficiency compatibility layer. Measures complete requests and safely compacts allowlisted exact duplicate tool output."
-author: MaronCorp
-hooks:
-  - pre_api_request
-  - post_api_request
-  - api_request_error
-  - on_session_finalize

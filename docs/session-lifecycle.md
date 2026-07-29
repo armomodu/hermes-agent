@@ -79,6 +79,13 @@ incoming `MessageEvent` and used for routing, isolation, and context injection.
 | `cost_status` | `str` | `"unknown"` | Cost tracking status label. |
 | `last_prompt_tokens` | `int` | `0` | Last API-reported prompt token count. Used for accurate compression pre-check. |
 
+Mission Control context-efficiency instrumentation is not implemented in
+Hermes core. The update-proof user plugin
+`~/.hermes/plugins/observability/mc_context_efficiency` observes stable request
+and finalization hooks and records content-free prompt-category, usage,
+compaction, latency, and repetition metrics. Plugin failure is fail-open and
+full context remains authoritative.
+
 ### Boolean Flags (State Machine)
 
 SessionEntry has several boolean flags that form a simple state machine governing session
