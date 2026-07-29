@@ -192,11 +192,11 @@ do not reconstruct from memory.
 Do not replace this helper with ad hoc shell data plumbing. On an ambiguous timeout, read the live
 objective before deciding whether submission may be retried.
 12. On HTTP success, run `python3 scripts/decomposition_checkpoint.py mark accepted`.
-13. Complete only after `checkpointStatus="accepted"` with `python3
-    scripts/complete_decomposition.py`; it verifies the checkpoint and exact result first.
-14. Report convergence metrics with `python3 scripts/decomposition_checkpoint.py metrics`.
-
-15. Read the response. Stop on any rejection; report the exact finding rather than improvising a
+13. Report convergence metrics with `python3 scripts/decomposition_checkpoint.py metrics`.
+14. As the final tool call, run `python3 scripts/complete_decomposition.py`. It verifies the accepted
+    checkpoint and exact result, then terminally completes the card. Make no further tool calls,
+    workspace reads, or native `kanban_complete` calls; immediately end the session.
+15. On any rejection, report the exact finding rather than improvising a
    legacy or smaller graph.
 
 The expander creates deterministic UUIDs and plan structure only. The batch validator remains the

@@ -557,6 +557,10 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             "Documentation of newly implemented behavior consumes and depends",
             skill,
         )
+        metrics_index = skill.index("decomposition_checkpoint.py metrics")
+        completion_index = skill.index("As the final tool call")
+        self.assertLess(metrics_index, completion_index)
+        self.assertIn("Make no further tool calls", skill)
 
     def test_manifest_bootstrap_is_deterministic_and_slice_complete(self) -> None:
         objective = {

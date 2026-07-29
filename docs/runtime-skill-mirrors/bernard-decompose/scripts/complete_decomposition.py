@@ -79,7 +79,10 @@ def main() -> int:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    print(f"Completed accepted decomposition task {args.task_id}")
+    print(
+        f"Completed accepted decomposition task {args.task_id}. "
+        "This was the final tool action; end the session without further tool calls."
+    )
     return 0
 
 
