@@ -184,6 +184,12 @@ def record_build(
             or current.get("objectiveDigest") == objective_digest
         )
     )
+    if same_objective and current.get("checkpointStatus") == "correction_rejected":
+        raise ValueError(
+            "TERMINAL_DECOMPOSITION_FAILURE: bounded correction was rejected; "
+            "do not rebuild, regenerate, rewrite the checkpoint, or inspect tool source; "
+            "block the Hermes task with the final validator report now"
+        )
     previous_digest = current.get("manifestDigest") if same_objective else None
     correction_round = int(current.get("correctionRound", 0)) if same_objective else 0
     task_keys = sorted(

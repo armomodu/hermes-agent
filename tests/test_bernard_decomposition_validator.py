@@ -1583,6 +1583,29 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 checkpoint["retryContext"]["lastFindingCount"],
                 checkpoint["findingCount"],
             )
+            blocked_rebuild = subprocess.run(
+                build,
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(blocked_rebuild.returncode, 0)
+            self.assertIn("TERMINAL_DECOMPOSITION_FAILURE", blocked_rebuild.stderr)
+
+            blocked_reinitialize = subprocess.run(
+                [
+                    "python3",
+                    str(CONTRACT_BUILDER),
+                    "--init-manifest",
+                    str(objective_path),
+                    str(workspace / "manifest-fresh.json"),
+                ],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(blocked_reinitialize.returncode, 0)
+            self.assertIn("TERMINAL_DECOMPOSITION_FAILURE", blocked_reinitialize.stderr)
 
     def test_repair_without_plan_fails(self) -> None:
         payload = repair_payload()

@@ -9,7 +9,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from decomposition_checkpoint import record_build
+from decomposition_checkpoint import load_checkpoint, record_build
 
 
 LIST_FIELDS = (
@@ -460,6 +460,24 @@ def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
 def main() -> int:
     if len(sys.argv) == 4 and sys.argv[1] == "--init-manifest":
         try:
+            existing = load_checkpoint(Path(sys.argv[3]).parent)
+            if existing:
+                if (
+                    existing.get("checkpointStatus") == "correction_rejected"
+                    or (
+                        int(existing.get("correctionRound", 0)) >= 2
+                        and int(existing.get("findingCount", 0)) > 0
+                    )
+                ):
+                    raise ValueError(
+                        "TERMINAL_DECOMPOSITION_FAILURE: bounded correction rounds are exhausted; "
+                        "do not rebuild, regenerate, rewrite the checkpoint, or inspect tool source; "
+                        "block the Hermes task with the final validator report now"
+                    )
+                raise ValueError(
+                    "a decomposition checkpoint already exists; resume and edit its canonical "
+                    "manifest instead of initializing another manifest"
+                )
             objective = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
             if not isinstance(objective, dict):
                 raise ValueError("objective must be an object")

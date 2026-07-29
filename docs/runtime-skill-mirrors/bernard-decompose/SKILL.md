@@ -170,6 +170,9 @@ rejects stale completed contracts and non-evidence changes to incomplete contrac
    and revalidate. Every correction must reduce the finding count without introducing a new finding
    fingerprint; `correction_rejected` means use the remaining bounded round or stop. Never patch
    generated JSON and never regenerate the manifest.
+   When narrowing a mutation root, atomically align `writableFiles` and `createdFileGlobs` to the same
+   exact scope in that correction. On `TERMINAL_DECOMPOSITION_FAILURE`, call `kanban_block` with the
+   final report immediately and make no further tool calls.
 9. Complete within one initial draft plus at most two correction rounds. If still invalid, block with
    the final report.
 10. Before retrying after timeout, run `python3 scripts/decomposition_checkpoint.py resume`.
