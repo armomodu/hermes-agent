@@ -18,6 +18,7 @@ CHECKPOINT_NAME = ".mc-decomposition-checkpoint.json"
 REPORT_NAME = "decomposition-validator-report.json"
 VERSION = "decomposition-checkpoint.v1"
 ARCHIVE_DIR_NAME = ".mc-decomposition-checkpoints"
+INFLIGHT_DIR_NAME = "inflight"
 
 
 def _now() -> datetime:
@@ -76,8 +77,21 @@ def checkpoint_path(workspace: Path | None = None) -> Path:
     return (workspace or Path.cwd()) / CHECKPOINT_NAME
 
 
-def load_checkpoint(workspace: Path | None = None) -> dict[str, Any] | None:
-    path = checkpoint_path(workspace)
+def _archive_root(workspace: Path | None = None) -> Path:
+    root_override = os.environ.get("BERNARD_DECOMPOSITION_ARCHIVE_ROOT")
+    return (
+        Path(root_override).expanduser()
+        if root_override
+        else (workspace or Path.cwd()).parent / ARCHIVE_DIR_NAME
+    )
+
+
+def _inflight_checkpoint_path(workspace: Path | None = None) -> Path:
+    resolved_workspace = workspace or Path.cwd()
+    return _archive_root(resolved_workspace) / INFLIGHT_DIR_NAME / f"{resolved_workspace.name}.json"
+
+
+def _read_checkpoint(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -85,9 +99,31 @@ def load_checkpoint(workspace: Path | None = None) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) and payload.get("version") == VERSION else None
 
 
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary_path, path)
+
+
+def load_checkpoint(workspace: Path | None = None) -> dict[str, Any] | None:
+    path = checkpoint_path(workspace)
+    journal = _read_checkpoint(_inflight_checkpoint_path(workspace))
+    local = _read_checkpoint(path)
+    if journal:
+        if local != journal:
+            _write_json_atomic(path, journal)
+        return journal
+    return local
+
+
 def _write_checkpoint(payload: dict[str, Any], workspace: Path | None = None) -> dict[str, Any]:
     path = checkpoint_path(workspace)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_json_atomic(_inflight_checkpoint_path(workspace), payload)
+    _write_json_atomic(path, payload)
     return payload
 
 
@@ -95,13 +131,11 @@ def _accepted_archive_path(
     checkpoint: dict[str, Any],
     workspace: Path | None = None,
 ) -> Path:
-    root_override = os.environ.get("BERNARD_DECOMPOSITION_ARCHIVE_ROOT")
-    root = (
-        Path(root_override).expanduser()
-        if root_override
-        else (workspace or Path.cwd()).parent / ARCHIVE_DIR_NAME
+    return (
+        _archive_root(workspace)
+        / str(checkpoint["objectiveId"])
+        / str(checkpoint["manifestDigest"])
     )
-    return root / str(checkpoint["objectiveId"]) / str(checkpoint["manifestDigest"])
 
 
 def _archive_accepted_checkpoint(

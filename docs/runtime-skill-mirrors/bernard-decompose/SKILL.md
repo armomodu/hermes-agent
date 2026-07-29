@@ -131,7 +131,9 @@ python3 scripts/build_contract_decomposition.py \
 2. Give every slice a stable semantic `key`. Never change a key during correction.
    The checkpoint rejects a correction that replaces every existing key for an unchanged objective;
    edit the canonical manifest in place and preserve the task identities that remain semantically
-   valid.
+   valid. The checkpoint helper journals in-progress continuity outside the task workspace and
+   restores a missing or altered workspace copy. Never delete or manually rewrite
+   `.mc-decomposition-checkpoint.json`.
    For a live graph amendment only, copy each existing child's authoritative ID into
    `persistedTaskId` and copy its accepted live `taskContract` exactly; omit the ID only for a
    genuinely new slice so the builder derives a new stable ID. An incomplete downstream slice may
@@ -184,8 +186,9 @@ rejects stale completed contracts and non-evidence changes to incomplete contrac
 python3 scripts/decomposition_checkpoint.py resume
 ```
 
-Resume the recorded manifest and correction round. A missing checkpoint is a continuity blocker; do
-not reconstruct from memory.
+Resume the recorded manifest and correction round. The helper restores the workspace checkpoint from
+its in-progress journal when possible. If both copies are missing or invalid, continuity is blocked;
+do not reconstruct from memory.
 11. Submit the exact validated `decomposition.json` once through the bounded helper. It reads
    `MC_API_URL` and `CRON_SERVICE_TOKEN` from the environment, performs one authenticated JSON POST,
    identifies itself as the Hermes Mission Control service at the public edge, and avoids shell
