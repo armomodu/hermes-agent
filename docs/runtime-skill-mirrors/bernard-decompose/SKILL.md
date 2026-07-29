@@ -72,6 +72,8 @@ Hard boundaries:
   prove itself.
 - Documentation readback is the authored document itself: set `proofRoot=mutationRoot` and keep
   `proofFiles=[]`; never invent a sibling `src/docs` proof path.
+- If `touchedSurfaces` explicitly names documentation and a docs expansion zone exists, assign one
+  bounded docs task; prior validator failures are not authority to omit the current requirement.
 - A task with `proofFiles=[]` must not request `software_test`. Put executable tests and that gate on a
   separate proof-only task, and keep every `focusedTests` path inside its declared `proofFiles`.
 - `verification.qualityGates` uses only `software_test`, `software_lint`, and `software_build`.

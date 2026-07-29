@@ -1834,6 +1834,96 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("authority_root_created_by_task", result.stderr)
 
+    def test_contract_required_requires_owner_for_documentation_touched_surface(self) -> None:
+        payload = contract_required_payload()
+        objective = {
+            "id": str(uuid.uuid4()),
+            "decompositionContract": {
+                "taskContractRequired": True,
+                "maxTaskCount": 8,
+                "allowedExpansionZone": [
+                    "apps/mission-control/src/lib/knowledge-plane/**",
+                    "apps/mission-control/docs/knowledge-plane/**",
+                ],
+                "sourceAnchors": [
+                    "apps/mission-control/src/lib/storage/types.ts",
+                ],
+                "touchedSurfaces": ["Knowledge Plane operator documentation"],
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload_path = Path(temp_dir) / "payload.json"
+            objective_path = Path(temp_dir) / "objective.json"
+            payload_path.write_text(json.dumps(payload), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+
+            missing = subprocess.run(
+                [
+                    "python3",
+                    str(VALIDATOR),
+                    "--contract-required",
+                    str(payload_path),
+                    "--objective",
+                    str(objective_path),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("touched_surface_owner_missing", missing.stderr)
+
+            docs_id = str(uuid.uuid4())
+            docs_path = "apps/mission-control/docs/knowledge-plane/operator.md"
+            docs_contract = copy.deepcopy(payload["tasks"][0]["taskContract"])
+            docs_contract.update({
+                "primaryArtifactClass": "docs",
+                "mutationRoot": docs_path,
+                "authorityRoot": "apps/mission-control/src/lib/storage/types.ts",
+                "proofRoot": docs_path,
+                "writableFiles": [docs_path],
+                "createdFileGlobs": [docs_path],
+                "proofFiles": [],
+                "readOnlyAnchors": ["apps/mission-control/src/lib/storage/types.ts"],
+                "provides": ["knowledge-operator-docs-v1"],
+                "consumes": [],
+                "verification": {"focusedTests": [], "qualityGates": []},
+            })
+            payload["tasks"].insert(-2, {
+                "id": docs_id,
+                "title": "Document Knowledge Plane operations",
+                "assignee": "William",
+                "taskType": "execution",
+                "priority": "P1",
+                "nextAction": "Write bounded operator documentation",
+                "taskContract": docs_contract,
+            })
+            integration = payload["tasks"][-2]
+            integration["dependsOn"].append(docs_id)
+            integration["taskContract"]["consumes"].append("knowledge-operator-docs-v1")
+            integration["taskContract"]["executionPlan"]["steps"][1]["references"].append(
+                "consumedToken:knowledge-operator-docs-v1"
+            )
+            payload["tasks"][-1]["dependsOn"].append(docs_id)
+            payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            valid = subprocess.run(
+                [
+                    "python3",
+                    str(VALIDATOR),
+                    "--contract-required",
+                    str(payload_path),
+                    "--objective",
+                    str(objective_path),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(valid.returncode, 0, valid.stderr)
+
     def test_production_contract_requires_evidence_coverage_and_independent_gate(self) -> None:
         payload = contract_required_payload()
         objective = {

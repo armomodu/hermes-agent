@@ -921,6 +921,35 @@ def collect_contract_required_findings(
         normalized_string_list(objective_contract.get("allowedExpansionZone"))
         + normalized_string_list(objective_contract.get("sourceAnchors"))
     )
+    documentation_surfaces = [
+        surface
+        for surface in normalized_string_list(objective_contract.get("touchedSurfaces"))
+        if re.search(r"\b(documentation|docs)\b", surface, re.IGNORECASE)
+    ]
+    documentation_authorized = any(
+        "docs" in zone.replace("**", "").strip("/").split("/")
+        for zone in normalized_string_list(objective_contract.get("allowedExpansionZone"))
+    )
+    documentation_owners = [
+        task
+        for task in valid_tasks
+        if isinstance(task.get("taskContract"), dict)
+        and (
+            task["taskContract"].get("primaryArtifactClass") == "docs"
+            or str(task["taskContract"].get("mutationRoot") or "").endswith((".md", ".mdx"))
+            or "/docs/" in str(task["taskContract"].get("mutationRoot") or "")
+        )
+    ]
+    if documentation_authorized and documentation_surfaces and not documentation_owners:
+        for surface in documentation_surfaces:
+            findings.append(
+                _graph_finding(
+                    "touched_surface_owner_missing",
+                    "objective_coverage",
+                    f"touched surface has no bounded docs task owner: {surface}",
+                    paths=[surface],
+                )
+            )
     review_tasks: list[dict] = []
     execution_ids: set[str] = set()
     for task, task_id in zip(valid_tasks, task_ids):
