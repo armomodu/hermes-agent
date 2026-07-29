@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import os
 import tempfile
 import unittest
 
@@ -161,6 +162,34 @@ class CheckpointContinuityTest(unittest.TestCase):
                 ],
                 1,
             )
+
+    def test_relative_workspace_journal_is_outside_workspace(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = root / "task-workspace"
+            workspace.mkdir()
+            objective_path = workspace / "objective.json"
+            objective_path.write_text(json.dumps({"id": "obj-1", "title": "Stable"}))
+            decomposition_path = workspace / "decomposition.json"
+            decomposition_path.write_text("{}")
+            manifest_path = workspace / "manifest.json"
+            manifest_path.write_text(json.dumps({"tasks": [{"key": "first"}]}))
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(workspace)
+                checkpoint.record_build(
+                    objective_id="obj-1",
+                    manifest_path=Path("manifest.json"),
+                    decomposition_path=Path("decomposition.json"),
+                    objective_path=Path("objective.json"),
+                    workspace=Path("."),
+                )
+            finally:
+                os.chdir(previous_cwd)
+
+            journal = checkpoint._inflight_checkpoint_path(workspace)
+            self.assertTrue(journal.is_file())
+            self.assertFalse(journal.is_relative_to(workspace))
 
 
 if __name__ == "__main__":

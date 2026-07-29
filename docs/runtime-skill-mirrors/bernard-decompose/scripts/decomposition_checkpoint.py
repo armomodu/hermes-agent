@@ -74,20 +74,20 @@ def _expose_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
 
 
 def checkpoint_path(workspace: Path | None = None) -> Path:
-    return (workspace or Path.cwd()) / CHECKPOINT_NAME
+    return (workspace or Path.cwd()).resolve() / CHECKPOINT_NAME
 
 
 def _archive_root(workspace: Path | None = None) -> Path:
     root_override = os.environ.get("BERNARD_DECOMPOSITION_ARCHIVE_ROOT")
     return (
-        Path(root_override).expanduser()
+        Path(root_override).expanduser().resolve()
         if root_override
-        else (workspace or Path.cwd()).parent / ARCHIVE_DIR_NAME
+        else (workspace or Path.cwd()).resolve().parent / ARCHIVE_DIR_NAME
     )
 
 
 def _inflight_checkpoint_path(workspace: Path | None = None) -> Path:
-    resolved_workspace = workspace or Path.cwd()
+    resolved_workspace = (workspace or Path.cwd()).resolve()
     return _archive_root(resolved_workspace) / INFLIGHT_DIR_NAME / f"{resolved_workspace.name}.json"
 
 

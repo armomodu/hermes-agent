@@ -150,6 +150,9 @@ python3 scripts/build_contract_decomposition.py \
    - `slice:<zero-based approvedSlices index>` only for `sliceSource=objective_approved`.
 4. Express dependencies by key.
 5. Put all task-specific contract truth in each `contract`, including a compact `plan`.
+   For Bernard-authored slices, copy `contractGuide.taskTemplate` for every task and replace every
+   placeholder before the first build. Do not discover required fields by reading implementation
+   source, searching old sessions, or repeatedly invoking the builder with incomplete tasks.
    Assign every `contractGuide.unassignedRequirements` entry exactly once. Plan `operation` is only
    `add`, `modify`, or `remove`; created paths remain equal to or below their exact mutation root.
 6. Expand and checkpoint:

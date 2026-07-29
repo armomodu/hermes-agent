@@ -28,6 +28,49 @@ def semantic_key(value: str, index: int) -> str:
     return normalized or f"slice-{index}"
 
 
+def canonical_task_template() -> dict:
+    return {
+        "key": "",
+        "requirements": [],
+        "title": "",
+        "assignee": "William",
+        "taskType": "execution",
+        "priority": "P1",
+        "nextAction": "",
+        "dependsOn": [],
+        "reviewMode": None,
+        "contract": {
+            "semanticHinge": "",
+            "workflowFamily": "",
+            "mutationRoot": "",
+            "authorityRoot": "",
+            "proofRoot": "",
+            "acceptanceHinge": "",
+            "writableFiles": [],
+            "createdFileGlobs": [],
+            "proofFiles": [],
+            "readOnlyAnchors": [],
+            "outputArtifacts": [],
+            "provides": [],
+            "consumes": [],
+            "verification": {"focusedTests": [], "qualityGates": []},
+            "productionEvidence": [],
+            "primaryArtifactClass": "code",
+            "plan": {
+                "outcome": "",
+                "inspect": "",
+                "derive": "",
+                "apply": "",
+                "verify": "",
+                "operation": "modify",
+                "symbols": [],
+                "invariant": "",
+                "completionChecks": [],
+            },
+        },
+    }
+
+
 def initialize_manifest(objective: dict) -> dict:
     objective_id = require_text(objective.get("id"), "id", "objective")
     uuid.UUID(objective_id)
@@ -117,6 +160,7 @@ def initialize_manifest(objective: dict) -> dict:
         "contractGuide": {
             "sliceSource": "objective_approved" if approved_slices else "bernard_authored",
             "planOperations": ["add", "modify", "remove"],
+            "taskTemplate": canonical_task_template(),
             "unassignedRequirements": [
                 *[
                     f"ownership:{path}"
@@ -140,6 +184,7 @@ def initialize_manifest(objective: dict) -> dict:
                 "Implementation proofRoot is read-only and must not overlap writable or created scope.",
                 "The final integration proof depends on every preceding execution task.",
                 "The gate review is read-only and depends on every execution task.",
+                "Copy contractGuide.taskTemplate for each Bernard-authored task, then replace every placeholder.",
             ],
         },
         "tasks": tasks,

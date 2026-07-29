@@ -54,6 +54,40 @@ class PlanPolicyTest(unittest.TestCase):
         self.assertIn("read_only_execution_plan_applies_change", codes)
         self.assertIn("read_only_execution_plan_expected_changes", codes)
 
+    def test_initializer_exposes_complete_canonical_task_template(self):
+        manifest = builder.initialize_manifest(
+            {
+                "id": "60de1d80-3336-4fb2-83c4-fdb58cd6e76d",
+                "decompositionContract": {
+                    "requiredOwnershipPaths": ["src/workflow.ts"],
+                    "proofExpected": ["Focused workflow proof passes."],
+                },
+            }
+        )
+        template = manifest["contractGuide"]["taskTemplate"]
+        self.assertEqual(template["priority"], "P1")
+        self.assertEqual(template["dependsOn"], [])
+        self.assertIn("requirements", template)
+        self.assertIn("reviewMode", template)
+        self.assertEqual(
+            set(template["contract"]["plan"]),
+            {
+                "outcome",
+                "inspect",
+                "derive",
+                "apply",
+                "verify",
+                "operation",
+                "symbols",
+                "invariant",
+                "completionChecks",
+            },
+        )
+        self.assertEqual(
+            manifest["contractGuide"]["unassignedRequirements"],
+            ["ownership:src/workflow.ts", "proof:0"],
+        )
+
     def test_builder_uses_the_read_only_sequence(self):
         contract = self.fixtures["validReadOnlyReview"]
         plan = {
