@@ -463,11 +463,8 @@ def main() -> int:
             existing = load_checkpoint(Path(sys.argv[3]).parent)
             if existing:
                 if (
-                    existing.get("checkpointStatus") == "correction_rejected"
-                    or (
-                        int(existing.get("correctionRound", 0)) >= 2
-                        and int(existing.get("findingCount", 0)) > 0
-                    )
+                    int(existing.get("correctionRound", 0)) >= 2
+                    and int(existing.get("findingCount", 0)) > 0
                 ):
                     raise ValueError(
                         "TERMINAL_DECOMPOSITION_FAILURE: bounded correction rounds are exhausted; "

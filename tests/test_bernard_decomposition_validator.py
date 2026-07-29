@@ -1583,6 +1583,31 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 checkpoint["retryContext"]["lastFindingCount"],
                 checkpoint["findingCount"],
             )
+            manifest["tasks"][1]["contract"]["authorityRoot"] = (
+                "apps/mission-control/src/lib/release/objective-release-service.ts"
+            )
+            manifest["tasks"][2]["contract"]["authorityRoot"] = "apps/mission-control"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            final_build = subprocess.run(
+                build,
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(final_build.returncode, 0, final_build.stderr)
+            self.assertNotEqual(
+                subprocess.run(validate, cwd=workspace, capture_output=True, text=True).returncode,
+                0,
+            )
+            terminal_checkpoint = json.loads(
+                (workspace / ".mc-decomposition-checkpoint.json").read_text()
+            )
+            self.assertEqual(terminal_checkpoint["correctionRound"], 2)
+            self.assertEqual(
+                terminal_checkpoint["checkpointStatus"],
+                "correction_rejected",
+            )
+
             blocked_rebuild = subprocess.run(
                 build,
                 cwd=workspace,

@@ -184,7 +184,11 @@ def record_build(
             or current.get("objectiveDigest") == objective_digest
         )
     )
-    if same_objective and current.get("checkpointStatus") == "correction_rejected":
+    if (
+        same_objective
+        and current.get("checkpointStatus") == "correction_rejected"
+        and int(current.get("correctionRound", 0)) >= 2
+    ):
         raise ValueError(
             "TERMINAL_DECOMPOSITION_FAILURE: bounded correction was rejected; "
             "do not rebuild, regenerate, rewrite the checkpoint, or inspect tool source; "
