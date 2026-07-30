@@ -206,11 +206,20 @@ def _task_started(task: dict) -> bool:
     )
 
 
-def _safe_narrowing_contract(value: object) -> object:
+def _safe_narrowing_contract(
+    value: object,
+    *,
+    normalize_legacy_proof_class: bool = False,
+) -> object:
     contract = contract_without_additive_evidence(value)
     if not isinstance(contract, dict):
         return contract
     narrowed = dict(contract)
+    if (
+        normalize_legacy_proof_class
+        and narrowed.get("primaryArtifactClass") == "proof"
+    ):
+        narrowed["primaryArtifactClass"] = "focused_proof"
     narrowed.pop("executionPlan", None)
     verification = narrowed.get("verification")
     if isinstance(verification, dict):
@@ -257,7 +266,10 @@ def _is_safe_unreleased_narrowing(baseline_task: dict, proposed_task: dict) -> b
     baseline_contract = baseline_task.get("taskContract")
     proposed_contract = proposed_task.get("taskContract")
     if (
-        _safe_narrowing_contract(baseline_contract)
+        _safe_narrowing_contract(
+            baseline_contract,
+            normalize_legacy_proof_class=True,
+        )
         != _safe_narrowing_contract(proposed_contract)
         or not _safe_read_only_plan_narrowing(baseline_task, proposed_task)
     ):
