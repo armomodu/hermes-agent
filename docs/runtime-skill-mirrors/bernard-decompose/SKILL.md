@@ -80,11 +80,9 @@ Hard boundaries:
   separate proof-only task, and keep every `focusedTests` path inside its declared `proofFiles`.
 - `verification.qualityGates` uses only `software_test`, `software_lint`, and `software_build`.
   Do not invent aliases such as `mission_control_build`; the validator rejects unknown gate names.
-- New or changed proof belongs to a proof-only task whose mutation and proof root are the exact proof
-  file.
-- Proof-only slices keep `writableFiles` equal to `proofFiles`, keep `createdFileGlobs` inside that
-  exact proof set, and use the same exact `mutationRoot` and `proofRoot`. The builder canonicalizes
-  this mechanical shape to `primaryArtifactClass=proof`.
+- New proof uses exact equal mutation/proof roots and writable/proof files; the builder emits
+  `focused_proof`. Other classes are `code` for generic implementation, `integration_proof` for
+  final proof, and `review_gate` for final review; never emit legacy values.
 - `readOnlyAnchors` never overlap writable or created scope. An exact preserve-only file may be a
   sibling of the primary `authorityRoot` when it is necessary to retain canonical implementation
   semantics; directory and glob expansion outside the primary authority root remain forbidden.

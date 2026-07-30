@@ -47,6 +47,23 @@ SUPPORTED_QUALITY_GATES = {
     "software_build",
 }
 
+PRIMARY_ARTIFACT_CLASSES = {
+    "contract_family",
+    "schema_model",
+    "repository_boundary",
+    "writer",
+    "emitter_wiring",
+    "readback_query",
+    "readback_api",
+    "duplicate_prevention",
+    "backfill",
+    "docs",
+    "code",
+    "focused_proof",
+    "integration_proof",
+    "review_gate",
+}
+
 PRODUCTION_EVIDENCE_CATEGORIES = {
     "authentication_authorization",
     "input_validation_pagination",
@@ -370,6 +387,12 @@ def collect_task_contract_local_findings(
         return findings
     if task_contract.get("version") != "task-contract.v1":
         add("task_contract_version_invalid", f"taskContract.version must be task-contract.v1 for {task_id}")
+    artifact_class = str(task_contract.get("primaryArtifactClass") or "").strip()
+    if artifact_class not in PRIMARY_ARTIFACT_CLASSES:
+        add(
+            "primary_artifact_class_invalid",
+            f"taskContract.primaryArtifactClass is unsupported for {task_id}: {artifact_class}",
+        )
 
     roots = {
         field: str(task_contract.get(field) or "").strip()
@@ -482,6 +505,24 @@ def collect_task_contract_local_findings(
         verification = {}
     focused_tests = normalized_string_list(verification.get("focusedTests"))
     quality_gates = normalized_string_list(verification.get("qualityGates"))
+    proof_only = (
+        bool(proof_files)
+        and mutation_root == proof_root
+        and sorted(writable_files) == sorted(proof_files)
+        and "software_test" in quality_gates
+    )
+    if artifact_class == "focused_proof" and not proof_only:
+        add(
+            "focused_proof_scope_invalid",
+            f"focused_proof must own exactly its executable proofFiles for {task_id}",
+            sorted(set(writable_files + proof_files)),
+        )
+    if strict_graph and proof_only and artifact_class not in {"focused_proof", "integration_proof"}:
+        add(
+            "proof_artifact_class_invalid",
+            f"proof-only task must use focused_proof for {task_id}: {artifact_class}",
+            proof_files,
+        )
     production_evidence = task_contract.get("productionEvidence", [])
     if not isinstance(production_evidence, list):
         add("production_evidence_invalid", f"taskContract.productionEvidence must be a list for {task_id}")

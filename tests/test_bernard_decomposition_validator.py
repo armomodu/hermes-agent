@@ -40,6 +40,7 @@ SKILL = REPO_ROOT / "docs/runtime-skill-mirrors/bernard-decompose/SKILL.md"
 def task_contract(root: str) -> dict:
     return {
         "version": "task-contract.v1",
+        "primaryArtifactClass": "code",
         "semanticHinge": "Update one bounded contract surface",
         "workflowFamily": "contracts",
         "mutationRoot": root,
@@ -133,6 +134,7 @@ def contract_required_payload() -> dict:
         "focusedTests": [proof_file],
         "qualityGates": ["software_test"],
     }
+    proof["primaryArtifactClass"] = "focused_proof"
     proof["consumes"] = ["release-contract-v1"]
     proof["provides"] = ["release-proof-v1"]
 
@@ -1150,6 +1152,44 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 "consumedToken:artifact-registry-types-v1",
                 plan["steps"][1]["references"],
             )
+
+    def test_builder_emits_canonical_focused_proof_class(self) -> None:
+        manifest = compact_manifest()
+        proof_path = "apps/mission-control/src/lib/knowledge-plane/__tests__/focused.test.ts"
+        contract = manifest["tasks"][0]["contract"]
+        contract["mutationRoot"] = proof_path
+        contract["proofRoot"] = proof_path
+        contract["writableFiles"] = [proof_path]
+        contract["proofFiles"] = [proof_path]
+        contract["createdFileGlobs"] = [proof_path]
+        contract["verification"] = {
+            "focusedTests": [proof_path],
+            "qualityGates": ["software_test"],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "manifest.json"
+            output = Path(temp_dir) / "decomposition.json"
+            source.write_text(json.dumps(manifest), encoding="utf-8")
+            result = subprocess.run(
+                ["python3", str(CONTRACT_BUILDER), str(source), str(output)],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["tasks"][0]["taskContract"]["primaryArtifactClass"],
+                "focused_proof",
+            )
+
+    def test_contract_required_rejects_legacy_proof_class(self) -> None:
+        payload = contract_required_payload()
+        payload["tasks"][0]["taskContract"]["primaryArtifactClass"] = "proof"
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("primaryArtifactClass is unsupported", result.stderr)
 
     def test_compact_manifest_rejects_explicit_execution_plan(self) -> None:
         manifest = compact_manifest()
@@ -2220,7 +2260,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
 
     def test_contract_required_rejects_missing_integration_proof(self) -> None:
         payload = contract_required_payload()
-        payload["tasks"][2]["taskContract"]["primaryArtifactClass"] = "proof"
+        payload["tasks"][2]["taskContract"]["primaryArtifactClass"] = "focused_proof"
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("exactly one integration_proof", result.stderr)
