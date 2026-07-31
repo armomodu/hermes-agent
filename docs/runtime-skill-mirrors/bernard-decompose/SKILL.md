@@ -231,6 +231,11 @@ For a marked `task_repair_result` card:
 6. Run `python3 scripts/validate_decomposition_json.py --repair task-repair-result.json`.
 7. Return the exact validated JSON. Mission Control performs full-graph validation.
 
+Do not call Mission Control mutation endpoints during task repair. In particular, do not PATCH the
+source task, repair task, contract, blocker, status, attempt, or dispatch fields, and do not search for
+an endpoint that applies the repair. Hermes submits the returned `task_repair_result` through the
+governed evidence route after completion.
+
 Never complete a marked repair card with prose, null output, or an unvalidated contract.
 
 ## Submission Safety
