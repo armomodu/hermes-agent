@@ -503,6 +503,19 @@ def collect_task_contract_local_findings(
                     f"recursive writable scope over existing files is forbidden for {task_id}: {writable_file}",
                     [writable_file],
                 )
+        if (
+            not allow_read_only
+            and len(writable_files) == 1
+            and _is_exact_file_path(writable_files[0])
+            and mutation_root == writable_files[0]
+            and writable_files[0] not in created_file_globs
+        ):
+            add(
+                "exact_writable_creation_authorization_missing",
+                f"one-file executable task must creation-authorize its exact mutationRoot for {task_id}: "
+                f"{writable_files[0]}",
+                [writable_files[0]],
+            )
     for anchor in read_only_anchors:
         if any(_patterns_overlap(anchor, path) for path in writable_files + created_file_globs):
             add(

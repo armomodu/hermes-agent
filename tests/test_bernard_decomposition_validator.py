@@ -48,9 +48,7 @@ def task_contract(root: str) -> dict:
         "proofRoot": "apps/mission-control/src/lib/knowledge-plane/__tests__/release.test.ts",
         "acceptanceHinge": "The bounded contract matches release authority",
         "writableFiles": [f"{root}/release.ts"],
-        "createdFileGlobs": [
-            "apps/mission-control/src/lib/knowledge-plane/__tests__/release.test.ts"
-        ],
+        "createdFileGlobs": [],
         "proofFiles": ["apps/mission-control/src/lib/knowledge-plane/__tests__/release.test.ts"],
         "readOnlyAnchors": ["apps/mission-control/src/lib/release/objective-release-service.ts"],
         "outputArtifacts": [],
@@ -108,6 +106,9 @@ def repair_payload() -> dict:
         "nextAction": "Execute the validated bounded plan",
     }
     payload["taskContract"]["mutationRoot"] = payload["taskContract"]["writableFiles"][0]
+    payload["taskContract"]["createdFileGlobs"].append(
+        payload["taskContract"]["writableFiles"][0]
+    )
     return payload
 
 
@@ -118,7 +119,7 @@ def contract_required_payload() -> dict:
     review_id = str(uuid.uuid4())
     implementation = task_contract("apps/mission-control/src/lib/knowledge-plane/contracts")
     implementation["mutationRoot"] = implementation["writableFiles"][0]
-    implementation["createdFileGlobs"] = []
+    implementation["createdFileGlobs"] = [implementation["writableFiles"][0]]
     implementation["proofFiles"] = []
     implementation["verification"] = {"focusedTests": [], "qualityGates": []}
     implementation["provides"] = ["release-contract-v1"]
@@ -1780,7 +1781,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
 
     def test_repair_with_created_path_outside_contract_roots_fails(self) -> None:
         payload = repair_payload()
-        payload["taskContract"]["createdFileGlobs"] = ["apps/mission-control/src/app/api/unrelated.ts"]
+        payload["taskContract"]["createdFileGlobs"].append("apps/mission-control/src/app/api/unrelated.ts")
         result = self.run_validator(payload, "--repair")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("escapes mutationRoot", result.stderr)
@@ -1789,7 +1790,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         payload = repair_payload()
         payload["taskContract"]["proofRoot"] = "apps/mission-control/docs/proof.md"
         payload["taskContract"]["proofFiles"] = ["apps/mission-control/docs/proof.md"]
-        payload["taskContract"]["createdFileGlobs"] = ["apps/mission-control/docs/proof.md"]
+        payload["taskContract"]["createdFileGlobs"].append("apps/mission-control/docs/proof.md")
         result = self.run_validator(payload, "--repair")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("software_test proof scope is not executable", result.stderr)
@@ -1798,7 +1799,6 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         payload = repair_payload()
         payload["taskContract"]["proofRoot"] = "apps/mission-control/docs/proof.md"
         payload["taskContract"]["proofFiles"] = ["apps/mission-control/docs/proof.md"]
-        payload["taskContract"]["createdFileGlobs"] = ["apps/mission-control/docs/proof.md"]
         payload["taskContract"]["verification"] = {"focusedTests": [], "qualityGates": []}
         result = self.run_validator(payload, "--repair")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2341,6 +2341,14 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         result = self.run_validator(payload, "--contract-required")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("recursive writable scope over existing files is forbidden", result.stderr)
+
+    def test_contract_required_rejects_exact_writable_without_creation_authorization(self) -> None:
+        payload = contract_required_payload()
+        contract = payload["tasks"][0]["taskContract"]
+        contract["createdFileGlobs"] = []
+        result = self.run_validator(payload, "--contract-required")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exact_writable_creation_authorization_missing", result.stderr)
 
     def test_contract_required_generic_proof_does_not_require_json_authority_artifact(self) -> None:
         payload = contract_required_payload()

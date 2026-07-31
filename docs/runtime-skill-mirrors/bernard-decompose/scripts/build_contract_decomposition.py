@@ -381,6 +381,14 @@ def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
         }
         for field in LIST_FIELDS:
             contract[field] = require_string_list(contract_input.get(field, []), f"contract.{field}", key)
+        if (
+            item.get("taskType") != "review"
+            and len(contract["writableFiles"]) == 1
+            and not any(marker in contract["writableFiles"][0] for marker in ("*", "?", "[", "]", "{", "}"))
+            and contract["mutationRoot"] == contract["writableFiles"][0]
+            and contract["writableFiles"][0] not in contract["createdFileGlobs"]
+        ):
+            contract["createdFileGlobs"].append(contract["writableFiles"][0])
         verification = contract_input.get("verification", {})
         if not isinstance(verification, dict):
             raise ValueError(f"contract.verification must be an object for {key}")

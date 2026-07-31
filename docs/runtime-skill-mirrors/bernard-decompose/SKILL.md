@@ -11,13 +11,11 @@ trigger_conditions:
 ---
 
 # Bernard Decomposition
-
 ## Outcome
 Return one locally validated structured result:
 - `decomposition_result` for an objective decomposition; or
 - `task_repair_result` for a task-level contract repair.
 Do not execute implementation work, approve the objective, activate it, or release William.
-
 ## Authority-First Method
 1. Read the live Mission Control objective or repair card.
 2. Inventory objective requirements, required ownership paths, and live authority roots.
@@ -43,7 +41,6 @@ all confirmed owners converge and on the final integration proof.
 ## Contract-Required Decomposition
 When `decompositionContract.taskContractRequired=true`, every child uses
 `task-contract.v1`. Legacy-only tasks are forbidden.
-
 Each execution task declares:
 - one exact or creation-bounded `mutationRoot`;
 - one narrow `authorityRoot`;
@@ -69,6 +66,9 @@ Hard boundaries:
 - Exact existing files are enumerated. A recursive writable glob is only for genuinely new files.
 - `createdFileGlobs` participate in the same mutation-cluster check as `writableFiles`; when exact
   new files are known, enumerate them instead of pairing exact files with a broader directory glob.
+- When one-file executable scope equals `mutationRoot`, include that exact path in
+  `createdFileGlobs` even when the file may already exist. This authorizes creation without widening
+  scope and prevents new-file slices from failing only at workspace preflight.
 - Normal implementation tasks do not write proof files and use `proofFiles=[]`.
 - Documentation slices are normal implementation tasks for this rule; a writable document cannot
   prove itself.
@@ -113,7 +113,6 @@ semantic slices, the validator checks mechanics, and Mission Control remains fin
 
 ## Canonical Manifest Workflow
 Use this workflow for every contract-required graph:
-
 1. Fetch the governed objective with `python3 scripts/fetch_objective.py <objective-id> objective.json`,
    then run `python3 scripts/decomposition_checkpoint.py resume`.
    Reuse the checkpoint manifest when present. Otherwise immediately create the canonical skeleton:
@@ -204,7 +203,6 @@ single Bernard-side mechanical authority.
 
 ## Slice Matrix Checklist
 Before expansion, verify:
-
 - every approved slice is represented;
 - every required ownership path has one owner;
 - every required documentation path has one exact `primaryArtifactClass=docs` owner without
@@ -223,7 +221,6 @@ Before expansion, verify:
 
 ## Task Repair
 For a marked `task_repair_result` card:
-
 1. Preserve source task ID and attempt number.
 2. Repair only the defect; one exact writable file requires that exact `mutationRoot`.
 4. Include a complete ordered `executionPlan`.
@@ -239,7 +236,6 @@ governed evidence route after completion.
 Never complete a marked repair card with prose, null output, or an unvalidated contract.
 
 ## Submission Safety
-
 - Write files only in the task workspace.
 - Fail closed if `MC_API_URL`, the decompose URL, or `CRON_SERVICE_TOKEN` is missing.
 - Never submit twice after a timeout without reading objective state.
@@ -247,7 +243,6 @@ Never complete a marked repair card with prose, null output, or an unvalidated c
 - If local validation cannot pass, block with the exact validator output.
 
 ## On-Demand Reference
-
 The archived historical guidance is in
 `references/decomposition-policy-archive.md`. Do not load it during normal decomposition. Consult
 only a specifically named section when a validator finding cannot be resolved from this concise
