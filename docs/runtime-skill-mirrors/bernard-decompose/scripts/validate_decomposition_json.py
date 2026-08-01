@@ -1849,7 +1849,29 @@ def emit_contract_required_report(
     report_path: Path,
     workspace: Path,
 ) -> int:
-    findings = collect_contract_required_findings(
+    artifact_findings: list[dict] = []
+    if isinstance(manifest, dict) and isinstance(objective, dict):
+        try:
+            from build_contract_decomposition import expand_manifest
+
+            expected_payload = expand_manifest(manifest, objective)
+            if expected_payload != payload:
+                artifact_findings.append(
+                    _graph_finding(
+                        "manifest_payload_mismatch",
+                        "objective_coverage",
+                        "decomposition.json is not the deterministic expansion of the current manifest.json",
+                    )
+                )
+        except (ImportError, TypeError, ValueError) as error:
+            artifact_findings.append(
+                _graph_finding(
+                    "manifest_expansion_invalid",
+                    "objective_coverage",
+                    f"current manifest cannot be deterministically expanded: {error}",
+                )
+            )
+    findings = artifact_findings + collect_contract_required_findings(
         payload,
         max_tasks=max_tasks,
         objective=objective,
@@ -1966,7 +1988,20 @@ def emit_contract_required_report(
         from decomposition_checkpoint import record_validation
 
         record_validation(report=report, workspace=workspace)
-    except (ImportError, OSError, ValueError):
+    except (OSError, ValueError) as error:
+        if not any(item.get("code") == "build_artifact_mismatch" for item in findings):
+            finding = _graph_finding(
+                "build_artifact_mismatch",
+                "objective_coverage",
+                str(error),
+            )
+            findings.append(finding)
+            report["ok"] = False
+            report["findingCount"] = len(findings)
+            report["findings"] = findings
+            report["summary"]["objectiveCoverageFindings"] += 1
+            report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    except ImportError:
         pass
     print(json.dumps(report))
     if findings:

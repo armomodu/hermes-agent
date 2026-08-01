@@ -96,6 +96,38 @@ class CheckpointContinuityTest(unittest.TestCase):
             self.assertEqual(result["metrics"]["fullRegenerationCount"], 0)
             self.assertEqual(result["metrics"]["stableTaskIdentityCount"], 1)
 
+    def test_validation_rejects_manifest_or_decomposition_changed_after_build(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            objective_path = workspace / "objective.json"
+            objective_path.write_text(json.dumps({"id": "obj-1", "title": "Stable"}))
+            decomposition_path = workspace / "decomposition.json"
+            decomposition_path.write_text(json.dumps({"kind": "decomposition_result"}))
+            manifest_path = workspace / "manifest.json"
+            manifest_path.write_text(json.dumps({"tasks": [{"key": "first"}]}))
+            checkpoint.record_build(
+                objective_id="obj-1",
+                manifest_path=manifest_path,
+                decomposition_path=decomposition_path,
+                objective_path=objective_path,
+                workspace=workspace,
+            )
+
+            manifest_path.write_text(json.dumps({"tasks": [{"key": "first", "changed": True}]}))
+            with self.assertRaisesRegex(ValueError, "manifest does not match"):
+                checkpoint.record_validation(
+                    report={"ok": True, "findingCount": 0, "findings": []},
+                    workspace=workspace,
+                )
+
+            manifest_path.write_text(json.dumps({"tasks": [{"key": "first"}]}))
+            decomposition_path.write_text(json.dumps({"kind": "decomposition_result", "changed": True}))
+            with self.assertRaisesRegex(ValueError, "decomposition does not match"):
+                checkpoint.record_validation(
+                    report={"ok": True, "findingCount": 0, "findings": []},
+                    workspace=workspace,
+                )
+
     def test_restores_deleted_workspace_checkpoint_from_inflight_journal(self):
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)

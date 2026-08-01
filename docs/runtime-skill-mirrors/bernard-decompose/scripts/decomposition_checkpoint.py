@@ -34,6 +34,11 @@ def _digest(payload: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def artifact_digest(path: Path) -> str:
+    """Digest one JSON artifact using the checkpoint's canonical encoding."""
+    return _digest(json.loads(path.read_text(encoding="utf-8")))
+
+
 def _finding_key(finding: object) -> str:
     if not isinstance(finding, dict):
         return _digest({"invalidFinding": finding})
@@ -171,6 +176,7 @@ def record_build(
 ) -> dict[str, Any]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest_digest = _digest(manifest)
+    decomposition_digest = artifact_digest(decomposition_path)
     objective_digest = None
     if objective_path:
         objective_digest = _digest(json.loads(objective_path.read_text(encoding="utf-8")))
@@ -232,6 +238,7 @@ def record_build(
         "decompositionPath": str(decomposition_path.resolve()),
         "validatorReportPath": str((manifest_path.parent / REPORT_NAME).resolve()),
         "manifestDigest": manifest_digest,
+        "decompositionDigest": decomposition_digest,
         "manifestTaskKeys": task_keys,
         "objectiveDigest": objective_digest,
         "correctionRound": correction_round,
@@ -241,6 +248,7 @@ def record_build(
         "retryContext": {
             "objectiveDigest": objective_digest,
             "manifestDigest": manifest_digest,
+            "decompositionDigest": decomposition_digest,
             "correctionRound": correction_round,
             "manifestTaskKeys": task_keys,
             "lastFindingKeys": list(metrics.get("lastFindingKeys") or []),
@@ -271,6 +279,18 @@ def record_validation(
     current = load_checkpoint(workspace)
     if not current:
         return None
+    manifest_path = Path(str(current.get("manifestPath") or ""))
+    decomposition_path = Path(str(current.get("decompositionPath") or ""))
+    if (
+        not manifest_path.is_file()
+        or artifact_digest(manifest_path) != current.get("manifestDigest")
+    ):
+        raise ValueError("validator input manifest does not match the latest successful build")
+    if (
+        not decomposition_path.is_file()
+        or artifact_digest(decomposition_path) != current.get("decompositionDigest")
+    ):
+        raise ValueError("validator input decomposition does not match the latest successful build")
     now = _now()
     metrics = dict(current.get("metrics") or {})
     validation_runs = int(metrics.get("validationRuns", 0)) + 1
@@ -376,6 +396,8 @@ def resume_checkpoint(workspace: Path | None = None) -> dict[str, Any]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if _digest(manifest) != current.get("manifestDigest"):
         raise ValueError("checkpoint manifest digest does not match the persisted manifest")
+    if artifact_digest(decomposition_path) != current.get("decompositionDigest"):
+        raise ValueError("checkpoint decomposition digest does not match the persisted decomposition")
     metrics = dict(current.get("metrics") or {})
     metrics["workspaceResumeAttempts"] = int(metrics.get("workspaceResumeAttempts", 0)) + 1
     metrics["workspaceResumeSuccesses"] = int(metrics.get("workspaceResumeSuccesses", 0)) + 1

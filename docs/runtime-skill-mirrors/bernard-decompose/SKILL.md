@@ -182,20 +182,14 @@ rejects stale completed contracts and non-evidence changes to incomplete contrac
 Resume the recorded manifest and correction round. The helper restores the workspace checkpoint from
 its in-progress journal when possible. If both copies are missing or invalid, continuity is blocked;
 do not reconstruct from memory.
-11. Submit the exact validated `decomposition.json` once with `python3
-   scripts/submit_decomposition.py decomposition.json --response decomposition-response.json`. It reads
-   `MC_API_URL` and `CRON_SERVICE_TOKEN` from the environment, performs one authenticated JSON POST,
-   identifies itself as the Hermes Mission Control service at the public edge, and avoids shell
-   pipes or `curl --data-binary` patterns that trigger terminal approval:
-
-Do not replace this helper with ad hoc shell data plumbing. On an ambiguous timeout, read the live
-objective before deciding whether submission may be retried.
-12. On HTTP success, run `python3 scripts/decomposition_checkpoint.py mark accepted`.
-13. Report convergence metrics with `python3 scripts/decomposition_checkpoint.py metrics`.
-14. As the final tool call, run `python3 scripts/complete_decomposition.py`. It verifies the accepted
-    checkpoint and exact result, then terminally completes the card. Make no further tool calls,
-    workspace reads, or native `kanban_complete` calls; immediately end the session.
-15. On any rejection, report the exact finding rather than improvising a
+11. After validation succeeds, do not edit `manifest.json` or `decomposition.json`. As the one final
+    tool call, run `python3 scripts/complete_decomposition.py`. It verifies both artifact digests,
+    submits the exact graph once, reconciles an ambiguous timeout against the live objective, marks
+    the checkpoint accepted, and terminally completes the card. Make no further tool calls, workspace
+    reads, or native `kanban_complete` calls; immediately end the session.
+12. Do not replace this helper with ad hoc shell data plumbing. The legacy submit and checkpoint
+    commands remain available for compatibility, but normal live decomposition uses the atomic finalizer.
+13. On any rejection, report the exact finding rather than improvising a
    legacy or smaller graph.
 
 The expander creates deterministic UUIDs and plan structure only. The batch validator remains the

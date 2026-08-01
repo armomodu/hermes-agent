@@ -172,6 +172,11 @@ def initialize_manifest(objective: dict) -> dict:
                     "taskType": "execution",
                     "primaryArtifactClass": "integration_proof",
                     "qualityGates": ["software_test", "software_build"],
+                    "scopeRule": (
+                        "Own one exact proof file: mutationRoot=proofRoot and "
+                        "writableFiles=proofFiles=createdFileGlobs=[that exact file]. "
+                        "Keep authorityRoot and readOnlyAnchors outside writable scope."
+                    ),
                 },
                 "gateReview": {
                     "taskType": "review",

@@ -93,6 +93,11 @@ class PlanPolicyTest(unittest.TestCase):
                 "taskType": "execution",
                 "primaryArtifactClass": "integration_proof",
                 "qualityGates": ["software_test", "software_build"],
+                "scopeRule": (
+                    "Own one exact proof file: mutationRoot=proofRoot and "
+                    "writableFiles=proofFiles=createdFileGlobs=[that exact file]. "
+                    "Keep authorityRoot and readOnlyAnchors outside writable scope."
+                ),
             },
         )
         self.assertEqual(
@@ -185,7 +190,7 @@ class PlanPolicyTest(unittest.TestCase):
         }
         self.assertEqual(
             builder.canonical_artifact_class(contract, "proof"),
-            "proof",
+            "focused_proof",
         )
 
     def test_builder_does_not_reclassify_implementation(self):
