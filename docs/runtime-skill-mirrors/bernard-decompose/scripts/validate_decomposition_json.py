@@ -260,17 +260,46 @@ def _safe_read_only_plan_narrowing(baseline_task: dict, proposed_task: dict) -> 
     )
 
 
-def _is_safe_unreleased_narrowing(baseline_task: dict, proposed_task: dict) -> bool:
+def _with_valid_source_anchor_addition(
+    baseline_contract: object,
+    proposed_contract: object,
+    objective_source_anchors: set[str],
+) -> object:
+    if not isinstance(baseline_contract, dict) or not isinstance(proposed_contract, dict):
+        return proposed_contract
+    baseline_anchors = normalized_string_list(baseline_contract.get("readOnlyAnchors"))
+    proposed_anchors = normalized_string_list(proposed_contract.get("readOnlyAnchors"))
+    baseline_set = set(baseline_anchors)
+    proposed_set = set(proposed_anchors)
+    added = proposed_set - baseline_set
+    if not baseline_set.issubset(proposed_set) or not added.issubset(objective_source_anchors):
+        return proposed_contract
+    normalized = dict(proposed_contract)
+    normalized["readOnlyAnchors"] = baseline_anchors
+    return normalized
+
+
+def _is_safe_unreleased_narrowing(
+    baseline_task: dict,
+    proposed_task: dict,
+    *,
+    objective_source_anchors: set[str] | None = None,
+) -> bool:
     if _task_started(baseline_task):
         return False
     baseline_contract = baseline_task.get("taskContract")
     proposed_contract = proposed_task.get("taskContract")
+    comparable_proposed_contract = _with_valid_source_anchor_addition(
+        baseline_contract,
+        proposed_contract,
+        objective_source_anchors or set(),
+    )
     if (
         _safe_narrowing_contract(
             baseline_contract,
             normalize_legacy_proof_class=True,
         )
-        != _safe_narrowing_contract(proposed_contract)
+        != _safe_narrowing_contract(comparable_proposed_contract)
         or not _safe_read_only_plan_narrowing(baseline_task, proposed_task)
     ):
         return False
@@ -1907,7 +1936,16 @@ def emit_contract_required_report(
                     contracts_match = (
                         contract_without_additive_evidence(baseline_contract)
                         == contract_without_additive_evidence(proposed_contract)
-                        or _is_safe_unreleased_narrowing(baseline_task, proposed)
+                        or _is_safe_unreleased_narrowing(
+                            baseline_task,
+                            proposed,
+                            objective_source_anchors=set(normalized_string_list(
+                                objective.get("decompositionContract", {}).get("sourceAnchors")
+                                if isinstance(objective, dict)
+                                and isinstance(objective.get("decompositionContract"), dict)
+                                else []
+                            )),
+                        )
                     )
                     finding_code = "amendment_incomplete_contract_changed"
                     message = (

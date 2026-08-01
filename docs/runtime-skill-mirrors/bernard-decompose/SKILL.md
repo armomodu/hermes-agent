@@ -139,7 +139,9 @@ Use this workflow for every contract-required graph:
    genuinely new slice so the builder derives a new stable ID. An incomplete downstream slice may
    add `dependsOn`, `consumes`, and builder-derived `consumedToken:` plan references. Before any
    child is released, it may also remove quality gates or normalize a gate review to the read-only
-   plan above. Never add or broaden a quality gate during amendment. Started, released, reviewed,
+   plan above. A structured semantic finding may add an exact objective `sourceAnchor` to an
+   unreleased task's `readOnlyAnchors`; it may not widen writable or proof scope. Never add or broaden
+   a quality gate during amendment. Started, released, reviewed,
    completed, or phase-run-backed task contracts are immutable.
    Also set manifest `operation="amend"` and `decompositionContractPatch` to the smallest
    objective-contract update. The builder merges that patch with `--objective` and emits
@@ -184,8 +186,10 @@ rejects stale completed contracts and non-evidence changes to incomplete contrac
 Resume the recorded manifest and correction round. The helper restores the workspace checkpoint from
 its in-progress journal when possible. If both copies are missing or invalid, continuity is blocked;
 do not reconstruct from memory.
-11. After validation succeeds, do not edit `manifest.json` or `decomposition.json`. As the one final
-    tool call, run `python3 scripts/complete_decomposition.py`. It verifies both artifact digests,
+11. After validation succeeds, record the bounded-run metrics with
+    `python3 scripts/decomposition_checkpoint.py metrics`. Do not edit `manifest.json` or
+    `decomposition.json`. As the final tool call, run
+    `python3 scripts/complete_decomposition.py`. It verifies both artifact digests,
     submits the exact graph once, reconciles an ambiguous timeout against the live objective, marks
     the checkpoint accepted, and terminally completes the card. Make no further tool calls, workspace
     reads, or native `kanban_complete` calls; immediately end the session.

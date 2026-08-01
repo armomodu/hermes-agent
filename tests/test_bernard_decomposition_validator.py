@@ -830,14 +830,19 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             result_path = root / "decomposition.json"
+            manifest_path = root / "manifest.json"
             checkpoint_path = root / ".mc-decomposition-checkpoint.json"
             result_path.write_text(json.dumps(result), encoding="utf-8")
+            manifest_path.write_text(json.dumps({"tasks": []}), encoding="utf-8")
             checkpoint_path.write_text(
                 json.dumps(
                     {
                         "checkpointStatus": "accepted",
                         "objectiveId": objective_id,
                         "decompositionPath": str(result_path),
+                        "decompositionDigest": module.artifact_digest(result_path),
+                        "manifestPath": str(manifest_path),
+                        "manifestDigest": module.artifact_digest(manifest_path),
                     }
                 ),
                 encoding="utf-8",
@@ -871,7 +876,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             checkpoint_path.write_text(
                 json.dumps(
                     {
-                        "checkpointStatus": "validator_clean",
+                        "checkpointStatus": "draft",
                         "objectiveId": "objective",
                         "decompositionPath": str(result_path),
                     }
@@ -879,7 +884,7 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaisesRegex(ValueError, "must be accepted"):
+            with self.assertRaisesRegex(ValueError, "must be validator_clean or accepted"):
                 module.load_accepted_result(checkpoint_path, result_path)
 
     def test_legacy_string_approved_slice_remains_supported(self) -> None:
@@ -1404,6 +1409,87 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(report["findings"], [])
+
+    def test_amendment_accepts_exact_objective_source_anchor_as_read_only_authority(self) -> None:
+        manifest, objective = convergence_manifest()
+        source_anchor = "apps/mission-control/src/lib/workers/release-job-routing.ts"
+        objective["decompositionContract"]["sourceAnchors"] = [source_anchor]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            manifest_path = workspace / "manifest.json"
+            objective_path = workspace / "objective.json"
+            decomposition_path = workspace / "decomposition.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            build = subprocess.run(
+                [
+                    "python3",
+                    str(CONTRACT_BUILDER),
+                    str(manifest_path),
+                    str(decomposition_path),
+                    "--objective",
+                    str(objective_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(build.returncode, 0, build.stderr)
+            baseline = json.loads(decomposition_path.read_text(encoding="utf-8"))
+
+        manifest["operation"] = "amend"
+        manifest["decompositionContractPatch"] = {"semanticGradeRequired": True}
+        manifest["tasks"][0]["contract"]["readOnlyAnchors"].append(source_anchor)
+        result, report = self.run_contract_validation(
+            manifest,
+            objective,
+            amend_baseline=baseline,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["findings"], [])
+
+    def test_amendment_rejects_non_source_anchor_read_only_expansion(self) -> None:
+        manifest, objective = convergence_manifest()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            manifest_path = workspace / "manifest.json"
+            objective_path = workspace / "objective.json"
+            decomposition_path = workspace / "decomposition.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            build = subprocess.run(
+                [
+                    "python3",
+                    str(CONTRACT_BUILDER),
+                    str(manifest_path),
+                    str(decomposition_path),
+                    "--objective",
+                    str(objective_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(build.returncode, 0, build.stderr)
+            baseline = json.loads(decomposition_path.read_text(encoding="utf-8"))
+
+        manifest["operation"] = "amend"
+        manifest["decompositionContractPatch"] = {"semanticGradeRequired": True}
+        manifest["tasks"][0]["contract"]["readOnlyAnchors"].append(
+            "apps/mission-control/src/lib/workers/unrelated-authority.ts"
+        )
+        result, report = self.run_contract_validation(
+            manifest,
+            objective,
+            amend_baseline=baseline,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "amendment_incomplete_contract_changed",
+            {finding["code"] for finding in report["findings"]},
+        )
 
     def test_manifest_rejects_duplicate_persisted_task_ids(self) -> None:
         manifest = compact_manifest()

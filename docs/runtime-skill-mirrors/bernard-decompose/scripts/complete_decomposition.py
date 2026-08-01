@@ -13,6 +13,10 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
 from decomposition_checkpoint import artifact_digest, mark_status
 from submit_decomposition import SERVICE_USER_AGENT, load_payload, submit
 
