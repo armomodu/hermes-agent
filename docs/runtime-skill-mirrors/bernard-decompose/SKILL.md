@@ -122,8 +122,10 @@ Use this workflow for every contract-required graph:
    their documented CLI and validator report are the complete operational interface. If bootstrap
    fails, block with its error instead of reverse-engineering the tools.
    `sliceSource=bernard_authored` means add stable semantic tasks without `slice:N`; `objective_approved` means keep generated tasks and their `slice:N`.
-   If the objective exposes `lastDecompositionCandidate` and lint errors, preserve its task IDs and
-   slices in this same manifest and correct only reported findings.
+   If the objective exposes `lastDecompositionCandidate` and lint or semantic-grade errors, preserve
+   its candidate digest, correction round, task IDs, and slices in this same manifest and correct only
+   reported findings. A semantic correction is never a fresh decomposition: retain every valid task
+   identity, add only genuinely missing ownership, and submit the complete corrected candidate.
    The canonical manifest contains compact `contract.plan` instructions only. Never author, copy,
    or preserve `contract.executionPlan`; it is generated output owned exclusively by the builder.
 2. Give every slice a stable semantic `key`. Never change a key during correction.

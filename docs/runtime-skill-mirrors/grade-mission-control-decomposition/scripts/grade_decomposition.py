@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Semantic execution-safety grader for persisted Mission Control decompositions."""
+"""Semantic execution-safety grader for persisted or staged Mission Control decompositions."""
 
 from __future__ import annotations
 
@@ -48,6 +48,19 @@ def inside(path: str, root: str) -> bool:
     return clean_path == clean_root or clean_path.startswith(f"{clean_root}/")
 
 
+def task_owns_path(task: dict[str, Any], required_path: str) -> bool:
+    tc = contract(task)
+    exact_declared = (
+        strings(task.get("relatedFiles"))
+        + strings(tc.get("writableFiles"))
+        + strings(tc.get("proofFiles"))
+        + strings(tc.get("readOnlyAnchors"))
+    )
+    if required_path in exact_declared:
+        return True
+    return any(inside(required_path, glob) for glob in strings(tc.get("createdFileGlobs")))
+
+
 def finding(
     findings: list[dict[str, Any]],
     code: str,
@@ -70,25 +83,56 @@ def finding(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--objective", required=True)
-    parser.add_argument("--tasks", required=True)
+    parser.add_argument("--tasks")
+    parser.add_argument("--candidate")
     parser.add_argument("--report")
     args = parser.parse_args()
 
     objective = load_json(args.objective)
-    raw_tasks = load_json(args.tasks)
+    if not args.tasks and not args.candidate:
+        parser.error("one of --tasks or --candidate is required")
+    candidate = load_json(args.candidate) if args.candidate else None
+    raw_tasks = candidate.get("tasks", []) if isinstance(candidate, dict) else load_json(args.tasks)
     if isinstance(raw_tasks, dict):
         raw_tasks = raw_tasks.get("tasks", [])
     if not isinstance(raw_tasks, list):
         raise SystemExit("tasks input must be an array or an object with tasks[]")
 
     by_id = {task.get("id"): task for task in raw_tasks if isinstance(task, dict) and task.get("id")}
-    child_ids = strings(objective.get("childTaskIds"))
+    staged = isinstance(candidate, dict)
+    child_ids = [task_id for task_id in by_id] if staged else strings(objective.get("childTaskIds"))
     tasks = [by_id[task_id] for task_id in child_ids if task_id in by_id]
     findings: list[dict[str, Any]] = []
+    authority_evidence: list[dict[str, Any]] = []
 
     missing_children = [task_id for task_id in child_ids if task_id not in by_id]
     if missing_children:
         finding(findings, "objective_review_state_invalid", f"Missing persisted children: {missing_children}")
+
+    decomposition_contract = objective.get("decompositionContract")
+    required_paths = strings(
+        decomposition_contract.get("requiredOwnershipPaths")
+        if isinstance(decomposition_contract, dict)
+        else []
+    )
+    for required_path in required_paths:
+        owners = [task for task in tasks if task_owns_path(task, required_path)]
+        if not owners:
+            finding(
+                findings,
+                "invocation_chain_incomplete",
+                f"Required invocation-chain authority {required_path} has no truthful task owner.",
+                field="decompositionContract.requiredOwnershipPaths",
+            )
+        else:
+            authority_evidence.extend(
+                {
+                    "path": required_path,
+                    "taskId": owner.get("id"),
+                    "claim": "required invocation-chain authority is owned by this task",
+                }
+                for owner in owners
+            )
 
     execution = [task for task in tasks if task.get("taskType") == "execution"]
     reviews = [task for task in tasks if task.get("taskType") == "review"]
@@ -244,7 +288,7 @@ def main() -> int:
         and objective.get("needsDecomposition") is False
         and all_children_unreleased
     )
-    if not standard_review_state and not blocked_correction_review_state:
+    if not staged and not standard_review_state and not blocked_correction_review_state:
         finding(
             findings,
             "objective_review_state_invalid",
@@ -257,9 +301,15 @@ def main() -> int:
     grade = "A" if not findings else "B"
     verdict = "A-grade and ready for approval" if not findings else "return to Bernard for bounded correction"
     report = {
+        "kind": "decomposition_grade_result",
+        "version": "decomposition-grade.v1",
         "objectiveId": objective.get("id"),
+        "decompositionTaskId": candidate.get("decompositionTaskId") if staged else None,
+        "candidateDigest": candidate.get("candidateDigest") if staged else None,
+        "correctionRound": candidate.get("correctionRound", 0) if staged else 0,
         "grade": grade,
         "verdict": verdict,
+        "authorityEvidence": authority_evidence,
         "taskCount": len(tasks),
         "executionTaskCount": len(execution),
         "reviewTaskCount": len(reviews),

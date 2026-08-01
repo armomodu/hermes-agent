@@ -7,7 +7,7 @@ description: Grade a persisted Mission Control decomposition for semantic execut
 
 ## Purpose
 
-Decide whether an accepted decomposition is safe to approve. Bernard owns task design, the existing
+Decide whether a staged or accepted decomposition is safe to approve. Bernard owns task design, the existing
 validator owns mechanical correctness, Mission Control owns persistence, and this skill owns the
 operator's semantic A-grade decision.
 
@@ -24,6 +24,11 @@ Read live, current records:
 
 Do not grade recovery, review-quality, release, or machine rows as decomposition children.
 
+When `lastDecompositionCandidate.gradingState` is pending or grading, grade its exact `tasks` and
+`candidateDigest`; do not require persisted child rows. Emit `decomposition_grade_result` version
+`decomposition-grade.v1` with objective/task identity, candidate digest, correction round, grade,
+verdict, authority evidence, and structured findings.
+
 For a repeatable audit, save the objective JSON and filtered child array, then run:
 
 ```bash
@@ -34,6 +39,8 @@ python3 scripts/grade_decomposition.py \
 ```
 
 The script complements, and never replaces, Bernard's validator or Mission Control's compiler.
+
+For a staged candidate, pass `--candidate candidate.json` instead of `--tasks child-tasks.json`.
 
 ## A-Grade Contract
 
@@ -56,6 +63,8 @@ Require all of the following:
 - Full `software_build` belongs only to the final integration proof. Focused proof runs scoped tests.
 - A gate review has no writable scope, no `apply_change` plan step, and no expected mutation.
 - Persistence, API, schema, migration, export, and composition ownership is truthful when present.
+- Trace trigger -> routing -> executor -> persistence -> proof. Every required invocation file has
+  an exact task owner; otherwise report `invocation_chain_incomplete` with source evidence.
 - No sibling authority spill, generic proof reuse, self-authored parity truth, or duplicate writable
   ownership exists.
 - The objective is `reviewReady=true`, `approved=false`, and no William task has been released; or
@@ -106,6 +115,7 @@ Use these stable semantic codes:
 - `execution_plan_incomplete`
 - `execution_released_before_approval`
 - `objective_review_state_invalid`
+- `invocation_chain_incomplete`
 
 ## Report
 

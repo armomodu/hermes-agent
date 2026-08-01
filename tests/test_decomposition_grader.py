@@ -136,6 +136,47 @@ class DecompositionGraderTest(unittest.TestCase):
             ["legacy_primary_artifact_class"],
         )
 
+    def test_staged_candidate_requires_exact_invocation_chain_owner(self) -> None:
+        objective, tasks = graph("focused_proof")
+        routing_path = "apps/mission-control/src/lib/workers/release-job-routing.ts"
+        objective["decompositionContract"] = {"requiredOwnershipPaths": [routing_path]}
+        candidate = {
+            "decompositionTaskId": "decompose-1",
+            "candidateDigest": "digest-1",
+            "correctionRound": 0,
+            "tasks": tasks,
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            objective_path = root / "objective.json"
+            candidate_path = root / "candidate.json"
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+            result = subprocess.run(
+                ["python3", str(GRADER), "--objective", str(objective_path), "--candidate", str(candidate_path)],
+                cwd=ROOT, capture_output=True, text=True,
+            )
+            report = json.loads(result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invocation_chain_incomplete", [finding["code"] for finding in report["findings"]])
+
+        tasks[0]["taskContract"]["readOnlyAnchors"] = [routing_path]
+        candidate["tasks"] = tasks
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            objective_path = root / "objective.json"
+            candidate_path = root / "candidate.json"
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+            result = subprocess.run(
+                ["python3", str(GRADER), "--objective", str(objective_path), "--candidate", str(candidate_path)],
+                cwd=ROOT, capture_output=True, text=True,
+            )
+            report = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(report["grade"], "A")
+        self.assertEqual(report["candidateDigest"], "digest-1")
+
 
 if __name__ == "__main__":
     unittest.main()
