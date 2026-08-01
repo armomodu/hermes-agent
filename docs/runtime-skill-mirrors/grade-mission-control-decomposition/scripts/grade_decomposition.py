@@ -61,6 +61,25 @@ def task_owns_path(task: dict[str, Any], required_path: str) -> bool:
     return any(inside(required_path, glob) for glob in strings(tc.get("createdFileGlobs")))
 
 
+def is_invocation_anchor(path: str) -> bool:
+    normalized = path.lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "/route.ts",
+            "routing",
+            "worker",
+            "catalog",
+            "persistence",
+            "projector",
+            "orchestrat",
+            "scheduler",
+            "dispatcher",
+            "executor",
+        )
+    )
+
+
 def finding(
     findings: list[dict[str, Any]],
     code: str,
@@ -110,11 +129,21 @@ def main() -> int:
         finding(findings, "objective_review_state_invalid", f"Missing persisted children: {missing_children}")
 
     decomposition_contract = objective.get("decompositionContract")
-    required_paths = strings(
+    mechanically_required_paths = strings(
         decomposition_contract.get("requiredOwnershipPaths")
         if isinstance(decomposition_contract, dict)
         else []
     )
+    semantic_invocation_paths = [
+        path
+        for path in strings(
+            decomposition_contract.get("sourceAnchors")
+            if isinstance(decomposition_contract, dict)
+            else []
+        )
+        if is_invocation_anchor(path)
+    ]
+    required_paths = list(dict.fromkeys(mechanically_required_paths + semantic_invocation_paths))
     for required_path in required_paths:
         owners = [task for task in tasks if task_owns_path(task, required_path)]
         if not owners:
@@ -122,7 +151,11 @@ def main() -> int:
                 findings,
                 "invocation_chain_incomplete",
                 f"Required invocation-chain authority {required_path} has no truthful task owner.",
-                field="decompositionContract.requiredOwnershipPaths",
+                field=(
+                    "decompositionContract.requiredOwnershipPaths"
+                    if required_path in mechanically_required_paths
+                    else "decompositionContract.sourceAnchors"
+                ),
             )
         else:
             authority_evidence.extend(

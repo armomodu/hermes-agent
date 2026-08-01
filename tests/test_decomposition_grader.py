@@ -139,7 +139,7 @@ class DecompositionGraderTest(unittest.TestCase):
     def test_staged_candidate_requires_exact_invocation_chain_owner(self) -> None:
         objective, tasks = graph("focused_proof")
         routing_path = "apps/mission-control/src/lib/workers/release-job-routing.ts"
-        objective["decompositionContract"] = {"requiredOwnershipPaths": [routing_path]}
+        objective["decompositionContract"] = {"sourceAnchors": [routing_path]}
         candidate = {
             "decompositionTaskId": "decompose-1",
             "candidateDigest": "digest-1",

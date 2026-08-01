@@ -29,6 +29,10 @@ When `lastDecompositionCandidate.gradingState` is pending or grading, grade its 
 `decomposition-grade.v1` with objective/task identity, candidate digest, correction round, grade,
 verdict, authority evidence, and structured findings.
 
+For a Mission Control grading card, complete Hermes with the exact report JSON as the
+`kanban_complete(result=...)` value. A prose summary is not the result contract and must never be
+submitted in its place. The shared completion guard rejects an invalid result in the same session.
+
 For a repeatable audit, save the objective JSON and filtered child array, then run:
 
 ```bash
@@ -65,6 +69,8 @@ Require all of the following:
 - Persistence, API, schema, migration, export, and composition ownership is truthful when present.
 - Trace trigger -> routing -> executor -> persistence -> proof. Every required invocation file has
   an exact task owner; otherwise report `invocation_chain_incomplete` with source evidence.
+- Treat invocation-layer paths in the objective's `sourceAnchors` as semantic coverage requirements;
+  `requiredOwnershipPaths` remains the mechanical writable-owner contract.
 - No sibling authority spill, generic proof reuse, self-authored parity truth, or duplicate writable
   ownership exists.
 - The objective is `reviewReady=true`, `approved=false`, and no William task has been released; or
