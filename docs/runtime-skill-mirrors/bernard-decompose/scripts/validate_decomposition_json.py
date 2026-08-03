@@ -76,7 +76,7 @@ PRODUCTION_EVIDENCE_CATEGORIES = {
 
 TASK_TYPE_ALLOWED_ASSIGNEES = {
     "execution": {"William", "Codex", "Librarian"},
-    "review": {"Bernard", "Maeve", "Dolores", "Abdul"},
+    "review": {"Bernard", "Maeve", "Dolores", "Abdul", "operator"},
 }
 
 AUTHORITY_IMPACT_ROLES = {

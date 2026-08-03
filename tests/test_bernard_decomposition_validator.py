@@ -2226,6 +2226,27 @@ class BernardDecompositionValidatorTest(unittest.TestCase):
             )
             self.assertEqual(valid.returncode, 0, valid.stderr)
 
+            objective["decompositionContract"]["productionGateReviewer"] = "operator"
+            payload["tasks"][3]["assignee"] = "operator"
+            objective_path.write_text(json.dumps(objective), encoding="utf-8")
+            payload_path.write_text(json.dumps(payload), encoding="utf-8")
+            operator_gate = subprocess.run(
+                [
+                    "python3",
+                    str(VALIDATOR),
+                    "--contract-required",
+                    str(payload_path),
+                    "8",
+                    "--objective",
+                    str(objective_path),
+                ],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(operator_gate.returncode, 0, operator_gate.stderr)
+
     def test_contract_required_final_integration_consumes_every_upstream_token(self) -> None:
         payload = contract_required_payload()
         payload["tasks"][2]["taskContract"]["consumes"].remove("release-contract-v1")

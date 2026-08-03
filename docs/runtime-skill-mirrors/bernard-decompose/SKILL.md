@@ -107,7 +107,7 @@ For `production_component` or `production_release`, give every `requiredProducti
 category an exact proof owner with
 `productionEvidence=[{"category":"...","evidenceToken":"..."}]`, the same token in `provides`, and
 an executable existing quality gate. The integration task provides `final_integration_proof`; assign
-the final gate to `productionGateReviewer` (normally Dolores), never William or Bernard; execution slices stay with a worker/enricher and changing the assignee never bypasses a required root-bounded task split.
+the final gate to `productionGateReviewer` (normally Dolores); when it is `operator`, use lowercase `operator`, which is review-capable only for the read-only production gate. Never assign that gate to William or Bernard; execution slices stay with a worker/enricher and changing the assignee never bypasses a required root-bounded task split.
 `production_component` excludes cloud load/network/backup/restore/DR certification. Bernard selects
 semantic slices, the validator checks mechanics, and Mission Control remains final authority.
 
