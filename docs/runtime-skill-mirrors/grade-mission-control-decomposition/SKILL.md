@@ -44,6 +44,13 @@ python3 scripts/grade_decomposition.py \
 
 The script complements, and never replaces, Bernard's validator or Mission Control's compiler.
 
+The deterministic report is authoritative for mechanical and policy facts it evaluates. Grade only
+the current objective and exact candidate digest. Do not use prior sessions, historical compiler
+rejections, or stale inbox text to add a finding contradicted by the current report. Actor identity
+is canonical and case-insensitive: `Operator` and `operator` are the same reviewer. A production
+gate must match the objective's current `productionGateReviewer`; never replace an operator gate
+with Dolores merely because an older attempt rejected differently cased text.
+
 For a staged candidate, pass `--candidate candidate.json` instead of `--tasks child-tasks.json`.
 
 ## A-Grade Contract

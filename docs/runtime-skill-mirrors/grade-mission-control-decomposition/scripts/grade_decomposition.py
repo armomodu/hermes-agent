@@ -40,6 +40,10 @@ def contract(task: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def canonical_actor(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
 def inside(path: str, root: str) -> bool:
     clean_path = path.rstrip("/")
     clean_root = root.rstrip("/")
@@ -285,6 +289,23 @@ def main() -> int:
     else:
         review = reviews[0]
         tc = contract(review)
+        expected_reviewer = canonical_actor(
+            decomposition_contract.get("productionGateReviewer")
+            if isinstance(decomposition_contract, dict)
+            else None
+        )
+        actual_reviewer = canonical_actor(review.get("assignee"))
+        if expected_reviewer and actual_reviewer != expected_reviewer:
+            finding(
+                findings,
+                "gate_review_incomplete",
+                (
+                    f"Gate review assignee {review.get('assignee')!r} does not match "
+                    f"productionGateReviewer {decomposition_contract.get('productionGateReviewer')!r}."
+                ),
+                review,
+                "assignee",
+            )
         if strings(tc.get("writableFiles")) or strings(tc.get("createdFileGlobs")):
             finding(findings, "gate_review_incomplete", "Gate review must be read-only.", review)
         plan = tc.get("executionPlan") if isinstance(tc.get("executionPlan"), dict) else {}
