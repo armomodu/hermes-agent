@@ -10,11 +10,19 @@ Only one gateway owns the kanban dispatcher. The owning gateway keeps
 `kanban.dispatch_in_gateway: true` (the default); every other gateway sets it
 to `false`.
 
-**Why this matters:** a gateway with `dispatch_in_gateway: true` opens per-board
-SQLite connections for both the dispatcher and the notifier watcher. Multiple
-gateways doing this concurrently multiplies the open file descriptors on each
-`kanban.db` and amplifies WAL `-shm` reader contention. Gating both paths on the
-same flag means exactly one process touches the kanban DBs.
+**Why this matters:** dispatching is single-owner so multiple gateways do not
+race to spawn the same work. Notification delivery is profile-owned instead:
+each gateway polls only subscriptions for profiles whose platform adapters it
+hosts. The atomic event claim prevents duplicate delivery across watcher
+processes.
+
+Mission Control uses Dolores as that sole dispatcher. Bernard, William, and
+Librarian remain available as canonical assignees but keep dispatch disabled.
+Runtime upgrades are installed side-by-side and must pass Mission Control's
+external compatibility gate before LaunchAgents switch. Board recovery stops
+all writers, preserves the failed file and sidecars, recovers into a new file,
+and requires integrity, foreign-key, schema/index, and active-run reconciliation
+before restart. A failed gate leaves the previous runtime active.
 
 ## Configuration
 
@@ -30,13 +38,14 @@ Or set the env var: `HERMES_KANBAN_DISPATCH_IN_GATEWAY=false`
 
 ## What each gateway does
 
-| Gateway role | dispatch_in_gateway | Opens per-board DBs? | Runs dispatcher + notifier? |
-|---|---|---|---|
-| default (dispatch owner) | true (default) | yes | yes |
-| writer, admin, coder, etc. | false | no | no |
+| Gateway role | dispatch_in_gateway | Opens subscribed board DBs? | Dispatcher | Notifier |
+|---|---|---|---|---|
+| default (confirmed dispatch-lock owner) | true (default) | yes | yes | owned profiles + legacy unstamped subscriptions |
+| writer, admin, coder, etc. | false | yes, when the profile has subscriptions | no | that gateway's owned profiles |
 
 Non-dispatch gateways still deliver messages for their own platform adapters
-(Telegram, Discord, etc.) — they just don't poll kanban boards.
+(Telegram, Discord, etc.). They do not dispatch tasks, and they skip boards
+that have no subscriptions owned by their profiles.
 
 ## Provider quota backpressure
 

@@ -241,14 +241,9 @@ governed evidence route after completion.
 Never complete a marked repair card with prose, null output, or an unvalidated contract.
 
 ## Submission Safety
-- Write files only in the task workspace.
-- Fail closed if `MC_API_URL`, the decompose URL, or `CRON_SERVICE_TOKEN` is missing.
-- Never submit twice after a timeout without reading objective state.
-- Never create, approve, activate, or release execution tasks directly.
+- Write only in the task workspace; fail closed when required Mission Control URLs or credentials are missing.
+- Never submit twice after a timeout, and never create, approve, activate, or release execution tasks directly.
 - If local validation cannot pass, block with the exact validator output.
 
 ## On-Demand Reference
-The archived historical guidance is in
-`references/decomposition-policy-archive.md`. Do not load it during normal decomposition. Consult
-only a specifically named section when a validator finding cannot be resolved from this concise
-contract.
+Load only a named section of `references/decomposition-policy-archive.md` when this contract cannot resolve a validator finding.

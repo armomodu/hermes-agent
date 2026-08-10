@@ -155,10 +155,10 @@ def test_submitter_cli_posts_exact_payload(tmp_path: Path):
     assert json.loads(response_path.read_text()) == {"ok": True, "taskCount": 1}
 
 
-def test_skill_uses_submit_helper_instead_of_curl():
+def test_skill_uses_atomic_completion_helper_instead_of_curl():
     skill = (
         ROOT / "docs/runtime-skill-mirrors/bernard-decompose/SKILL.md"
     ).read_text(encoding="utf-8")
 
-    assert "scripts/submit_decomposition.py" in skill
-    assert "Submit the exact validated `decomposition.json` once" in skill
+    assert "scripts/complete_decomposition.py" in skill
+    assert "submits the exact graph once" in skill
