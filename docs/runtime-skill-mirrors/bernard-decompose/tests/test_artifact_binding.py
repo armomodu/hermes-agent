@@ -83,6 +83,29 @@ def manifest() -> dict:
 
 
 class ArtifactBindingTest(unittest.TestCase):
+    def test_validator_rejects_task_count_that_differs_from_approved_slices(self):
+        source_objective = objective()
+        source_objective["decompositionContract"]["approvedSlices"] = [
+            {"name": "first"},
+            {"name": "second"},
+        ]
+        source_manifest = manifest()
+        payload = builder.expand_manifest(source_manifest, source_objective)
+        with tempfile.TemporaryDirectory() as raw:
+            report_path = Path(raw) / "report.json"
+            result = validator.emit_contract_required_report(
+                payload,
+                max_tasks=10,
+                objective=source_objective,
+                manifest=source_manifest,
+                amend_baseline=None,
+                report_path=report_path,
+                workspace=Path(raw),
+            )
+            self.assertEqual(result, 1)
+            codes = {finding["code"] for finding in json.loads(report_path.read_text())["findings"]}
+            self.assertIn("task_count_mismatch_contract", codes)
+
     def test_validator_rejects_payload_not_generated_from_current_manifest(self):
         source_manifest = manifest()
         payload = builder.expand_manifest(source_manifest, objective())

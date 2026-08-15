@@ -916,6 +916,28 @@ def collect_contract_required_findings(
             )
         )
 
+    objective_contract = (
+        objective.get("decompositionContract")
+        if isinstance(objective, dict)
+        else None
+    )
+    approved_slices = (
+        objective_contract.get("approvedSlices")
+        if isinstance(objective_contract, dict)
+        else None
+    )
+    if isinstance(approved_slices, list) and approved_slices and len(tasks) != len(approved_slices):
+        findings.append(
+            _graph_finding(
+                "task_count_mismatch_contract",
+                "objective_coverage",
+                (
+                    f"task count {len(tasks)} must equal approved slice count "
+                    f"{len(approved_slices)}"
+                ),
+            )
+        )
+
     valid_tasks = [task for task in tasks if isinstance(task, dict)]
     if len(valid_tasks) != len(tasks):
         findings.append(_graph_finding("task_invalid", "task", "every task must be an object"))

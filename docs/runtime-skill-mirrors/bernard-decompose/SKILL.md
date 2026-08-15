@@ -58,6 +58,16 @@ Execution-plan policy is task-type specific:
   omit `apply_change`, and set `expectedChanges=[]`.
 
 Hard boundaries:
+- Objective `artifactPaths` and governed design documents are rationale evidence. Keep them in
+  `readOnlyAnchors`; never use them as an implementation task's `authorityRoot` or `proofRoot`.
+  Select the nearest pre-existing source owner from `sourceAnchors` or `requiredOwnershipPaths` as
+  implementation authority.
+- Home-directory and installed runtime paths such as `~/.hermes/**` are rollout evidence, not
+  governed task mutation scope. Do not create an execution slice for profile installation unless
+  the objective explicitly authorizes a tracked repository mirror and its existing runtime-action
+  installation path.
+- When `approvedSlices` is present, emit exactly one task per approved slice. Map ownership and
+  proof requirements into those slices; do not silently split or merge them.
 - One task owns one independently mutable production root.
 - Route list and dynamic-detail pages are separate mutation slices when their writable files have
   different parent roots; do not combine them under a broad page-directory mutation root.
