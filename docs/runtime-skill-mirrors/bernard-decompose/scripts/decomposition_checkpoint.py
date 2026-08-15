@@ -220,9 +220,12 @@ def record_build(
             "edit the existing manifest in place instead of regenerating"
         )
     metrics = dict(current.get("metrics") or {}) if same_objective else {}
-    if previous_digest and previous_digest != manifest_digest:
-        correction_round += 1
-    if correction_round > 2:
+    if (
+        previous_digest
+        and previous_digest != manifest_digest
+        and correction_round >= 2
+        and current.get("checkpointStatus") in {"correction_required", "correction_rejected"}
+    ):
         raise ValueError(
             "decomposition exceeded two correction rounds; stop instead of regenerating"
         )
@@ -246,6 +249,7 @@ def record_build(
         "updatedAt": _iso(now),
         "retainUntil": _iso(now + timedelta(hours=retention_hours)),
         "retryContext": {
+            **dict((current or {}).get("retryContext") or {}),
             "objectiveDigest": objective_digest,
             "manifestDigest": manifest_digest,
             "decompositionDigest": decomposition_digest,
@@ -293,7 +297,21 @@ def record_validation(
         raise ValueError("validator input decomposition does not match the latest successful build")
     now = _now()
     metrics = dict(current.get("metrics") or {})
-    validation_runs = int(metrics.get("validationRuns", 0)) + 1
+    prior_validation_runs = int(metrics.get("validationRuns", 0))
+    validation_runs = prior_validation_runs + 1
+    retry_context = dict(current.get("retryContext") or {})
+    last_validated_manifest_digest = retry_context.get("lastValidatedManifestDigest")
+    correction_round = int(current.get("correctionRound", 0))
+    if (
+        prior_validation_runs > 0
+        and last_validated_manifest_digest
+        and last_validated_manifest_digest != current.get("manifestDigest")
+    ):
+        correction_round += 1
+    if correction_round > 2:
+        raise ValueError(
+            "decomposition exceeded two validated correction rounds; stop instead of regenerating"
+        )
     current_codes = sorted(
         {
             str(finding.get("code"))
@@ -328,13 +346,13 @@ def record_validation(
         if correction_accepted
         else "correction_rejected"
     )
-    retry_context = dict(current.get("retryContext") or {})
     retry_context.update(
         {
-            "correctionRound": int(current.get("correctionRound", 0)),
+            "correctionRound": correction_round,
             "lastFindingKeys": current_finding_keys,
             "lastFindingCount": int(report.get("findingCount", 0)),
             "checkpointStatus": checkpoint_status,
+            "lastValidatedManifestDigest": current.get("manifestDigest"),
         }
     )
     next_metrics = _expose_metrics(
@@ -356,7 +374,7 @@ def record_validation(
             ) + len(introduced),
             "terminalConverged": bool(report.get("ok")),
             "terminalCorrectionRound": (
-                int(current.get("correctionRound", 0))
+                correction_round
                 if report.get("ok")
                 else metrics.get("terminalCorrectionRound")
             ),
@@ -364,6 +382,7 @@ def record_validation(
     )
     current.update(
         {
+            "correctionRound": correction_round,
             "checkpointStatus": checkpoint_status,
             "findingCount": int(report.get("findingCount", 0)),
             "retryContext": retry_context,

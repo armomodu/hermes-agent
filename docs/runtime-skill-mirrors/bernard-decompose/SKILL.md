@@ -191,6 +191,9 @@ rejects stale completed contracts and non-evidence changes to incomplete contrac
 Resume the recorded manifest and correction round. The helper restores the workspace checkpoint from
 its in-progress journal when possible. If both copies are missing or invalid, continuity is blocked;
 do not reconstruct from memory.
+Correction rounds are consumed only by completed validator results. A timeout after building a
+corrected manifest must resume and validate that same digest; rebuilding the unchanged digest does
+not consume another correction round.
 11. After validation succeeds, record the bounded-run metrics with
     `python3 scripts/decomposition_checkpoint.py metrics`. Do not edit `manifest.json` or
     `decomposition.json`. As the final tool call, run

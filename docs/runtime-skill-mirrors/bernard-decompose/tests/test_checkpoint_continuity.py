@@ -170,6 +170,14 @@ class CheckpointContinuityTest(unittest.TestCase):
                 objective_path=objective_path,
                 workspace=workspace,
             )
+            checkpoint.record_validation(
+                report={
+                    "ok": False,
+                    "findingCount": 1,
+                    "findings": [{"code": "first_finding", "message": "fix it"}],
+                },
+                workspace=workspace,
+            )
             manifest_path.write_text(
                 json.dumps({"tasks": [{"key": "first"}, {"key": "second"}]})
             )
@@ -178,6 +186,11 @@ class CheckpointContinuityTest(unittest.TestCase):
                 manifest_path=manifest_path,
                 decomposition_path=decomposition_path,
                 objective_path=objective_path,
+                workspace=workspace,
+            )
+            self.assertEqual(corrected["correctionRound"], 0)
+            corrected = checkpoint.record_validation(
+                report={"ok": True, "findingCount": 0, "findings": []},
                 workspace=workspace,
             )
             self.assertEqual(corrected["correctionRound"], 1)
@@ -194,6 +207,57 @@ class CheckpointContinuityTest(unittest.TestCase):
                 ],
                 1,
             )
+
+    def test_unvalidated_correction_rebuild_does_not_consume_an_extra_round(self):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            objective_path = workspace / "objective.json"
+            objective_path.write_text(json.dumps({"id": "obj-1", "title": "Stable"}))
+            decomposition_path = workspace / "decomposition.json"
+            decomposition_path.write_text("{}")
+            manifest_path = workspace / "manifest.json"
+            manifest_path.write_text(json.dumps({"tasks": [{"key": "first"}]}))
+            checkpoint.record_build(
+                objective_id="obj-1",
+                manifest_path=manifest_path,
+                decomposition_path=decomposition_path,
+                objective_path=objective_path,
+                workspace=workspace,
+            )
+            checkpoint.record_validation(
+                report={
+                    "ok": False,
+                    "findingCount": 1,
+                    "findings": [{"code": "first_finding", "message": "fix it"}],
+                },
+                workspace=workspace,
+            )
+
+            manifest_path.write_text(
+                json.dumps({"tasks": [{"key": "first", "corrected": True}]})
+            )
+            first_build = checkpoint.record_build(
+                objective_id="obj-1",
+                manifest_path=manifest_path,
+                decomposition_path=decomposition_path,
+                objective_path=objective_path,
+                workspace=workspace,
+            )
+            resumed_build = checkpoint.record_build(
+                objective_id="obj-1",
+                manifest_path=manifest_path,
+                decomposition_path=decomposition_path,
+                objective_path=objective_path,
+                workspace=workspace,
+            )
+            self.assertEqual(first_build["correctionRound"], 0)
+            self.assertEqual(resumed_build["correctionRound"], 0)
+
+            validated = checkpoint.record_validation(
+                report={"ok": True, "findingCount": 0, "findings": []},
+                workspace=workspace,
+            )
+            self.assertEqual(validated["correctionRound"], 1)
 
     def test_relative_workspace_journal_is_outside_workspace(self):
         with tempfile.TemporaryDirectory() as raw:
