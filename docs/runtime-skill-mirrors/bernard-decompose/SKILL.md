@@ -88,6 +88,9 @@ Hard boundaries:
   bounded docs task; prior validator failures are not authority to omit the current requirement.
 - A task with `proofFiles=[]` must not request `software_test`. Put executable tests and that gate on a
   separate proof-only task, and keep every `focusedTests` path inside its declared `proofFiles`.
+- Mission Control proof paths must fall under its configured Vitest discovery roots. A file merely
+  named `*.test.ts` under an undiscovered source directory is not executable proof; use an existing
+  discovered test root supplied by the contract guide.
 - `verification.qualityGates` uses only `software_test`, `software_lint`, and `software_build`.
   Do not invent aliases such as `mission_control_build`; the validator rejects unknown gate names.
 - New proof uses exact equal mutation/proof roots and writable/proof files; the builder emits

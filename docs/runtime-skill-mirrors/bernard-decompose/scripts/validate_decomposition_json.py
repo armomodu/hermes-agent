@@ -370,9 +370,33 @@ def _patterns_overlap(left: str, right: str) -> bool:
 
 def _is_executable_software_test_proof(path: str) -> bool:
     normalized = path.strip().replace("\\", "/").removeprefix("./")
+    package_relative = normalized.removeprefix("apps/mission-control/")
+    mission_control_roots = (
+        "src/app",
+        "src/components",
+        "src/lib/__tests__",
+        "src/lib/attempt-classification",
+        "src/lib/decomposition",
+        "src/lib/knowledge-plane",
+        "src/lib/auth",
+        "src/lib/bernard",
+        "src/lib/release",
+        "src/lib/workers",
+        "src/lib/storage",
+        "src/lib/inbox",
+        "src/lib/hermes-sync",
+        "src/lib/tasks",
+    )
+    test_suffix = bool(
+        re.search(r"\.(?:test|spec)\.(?:[cm]?[jt]sx?|mjs|cjs)$", package_relative, re.IGNORECASE)
+    )
+    if normalized.startswith("apps/mission-control/"):
+        return test_suffix and any(
+            package_relative.startswith(f"{root}/") for root in mission_control_roots
+        )
     return bool(
         re.search(r"(?:^|/)__tests__/.+\.[cm]?[jt]sx?$", normalized)
-        or re.search(r"\.(?:test|spec)\.[cm]?[jt]sx?$", normalized, re.IGNORECASE)
+        or test_suffix
     )
 
 

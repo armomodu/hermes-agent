@@ -83,6 +83,14 @@ def manifest() -> dict:
 
 
 class ArtifactBindingTest(unittest.TestCase):
+    def test_executable_proof_matches_mission_control_vitest_discovery(self):
+        self.assertTrue(validator._is_executable_software_test_proof(
+            "apps/mission-control/src/lib/decomposition/__tests__/contract.test.ts"
+        ))
+        self.assertFalse(validator._is_executable_software_test_proof(
+            "apps/mission-control/src/lib/production-control/__tests__/store-only-canary.test.ts"
+        ))
+
     def test_validator_rejects_task_count_that_differs_from_approved_slices(self):
         source_objective = objective()
         source_objective["decompositionContract"]["approvedSlices"] = [
