@@ -24,6 +24,17 @@ all writers, preserves the failed file and sidecars, recovers into a new file,
 and requires integrity, foreign-key, schema/index, and active-run reconciliation
 before restart. A failed gate leaves the previous runtime active.
 
+## Mission Control completion contracts
+
+Mission Control cards may declare `MC Completion Contract: <kind>` in the task
+body. Those cards cannot complete from a prose summary alone. The worker must
+pass `result=` as a JSON object whose `kind` exactly matches the declaration.
+Hermes leaves summary-only completion unchanged for ordinary cards.
+
+This guard keeps structured completion evidence at the existing Kanban tool
+boundary. It prevents a successful worker handoff from becoming an invalid
+Mission Control projection without changing dispatch, retries, or card state.
+
 ## Configuration
 
 On the dispatch-owning gateway (typically the `default` profile), no change is

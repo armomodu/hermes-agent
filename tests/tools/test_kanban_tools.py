@@ -132,6 +132,49 @@ def test_complete_happy_path(worker_env):
         conn.close()
 
 
+def test_complete_requires_matching_json_result_for_mc_contract(monkeypatch, tmp_path):
+    from pathlib import Path as _Path
+    from hermes_cli import kanban_db as kb
+    from tools import kanban_tools as kt
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("HERMES_PROFILE", "maeve")
+    monkeypatch.setattr(_Path, "home", lambda: tmp_path)
+    kb._INITIALIZED_PATHS.clear()
+    kb.init_db()
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(
+            conn,
+            title="Review content",
+            assignee="maeve",
+            body="Return JSON.\nMC Completion Contract: review_decision",
+        )
+        kb.claim_task(conn, tid)
+    finally:
+        conn.close()
+    monkeypatch.setenv("HERMES_KANBAN_TASK", tid)
+
+    summary_only = json.loads(kt._handle_complete({"summary": "APPROVED"}))
+    assert "requires result=" in summary_only["error"]
+    malformed = json.loads(kt._handle_complete({"result": "not-json"}))
+    assert "valid JSON" in malformed["error"]
+    wrong_kind = json.loads(kt._handle_complete({"result": json.dumps({"kind": "execution_result"})}))
+    assert "requires kind=review_decision" in wrong_kind["error"]
+    accepted = json.loads(kt._handle_complete({
+        "summary": "APPROVED",
+        "result": json.dumps({"kind": "review_decision", "decision": "approve"}),
+    }))
+    assert accepted["ok"] is True
+
+
+def test_complete_keeps_summary_only_for_non_mc_tasks(worker_env):
+    from tools import kanban_tools as kt
+    assert json.loads(kt._handle_complete({"summary": "ordinary handoff"}))["ok"] is True
+
+
 def test_complete_retry_with_empty_created_cards_succeeds(worker_env):
     """After a phantom rejection, retrying kanban_complete with
     created_cards=[] (the documented escape hatch) must complete the

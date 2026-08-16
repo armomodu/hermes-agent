@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any, Optional
 
 from agent.redact import redact_sensitive_text
@@ -752,6 +753,28 @@ def _handle_complete(args: dict, **kw) -> str:
             # Only enforce when a judge is actually reachable — see
             # _goal_judge_available for why an unavailable judge fails open.
             task = kb.get_task(conn, tid)
+            contract_match = re.search(
+                r"(?mi)^\s*MC Completion Contract:\s*([a-z0-9_.-]+)\s*$",
+                str(getattr(task, "body", "") or ""),
+            )
+            if contract_match:
+                expected_kind = contract_match.group(1)
+                if not result:
+                    return tool_error(
+                        f"MC completion contract {expected_kind} requires result= with a JSON object; "
+                        "summary alone cannot complete this task"
+                    )
+                try:
+                    contract_result = json.loads(result)
+                except (TypeError, json.JSONDecodeError):
+                    return tool_error(
+                        f"MC completion contract {expected_kind} requires result= to be valid JSON"
+                    )
+                if not isinstance(contract_result, dict) or contract_result.get("kind") != expected_kind:
+                    actual_kind = contract_result.get("kind") if isinstance(contract_result, dict) else None
+                    return tool_error(
+                        f"MC completion contract requires kind={expected_kind}; got {actual_kind!r}"
+                    )
             rejection = _goal_mode_handoff_rejection(
                 task,
                 (summary or result or "").strip(),
