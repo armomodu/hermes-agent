@@ -150,7 +150,11 @@ def test_complete_requires_matching_json_result_for_mc_contract(monkeypatch, tmp
             conn,
             title="Review content",
             assignee="maeve",
-            body="Return JSON.\nMC Completion Contract: review_decision",
+            body=(
+                "Return JSON.\n"
+                "MC Completion Contract: review_decision\n"
+                "MC Completion Required Fields: decision"
+            ),
         )
         kb.claim_task(conn, tid)
     finally:
@@ -163,6 +167,8 @@ def test_complete_requires_matching_json_result_for_mc_contract(monkeypatch, tmp
     assert "valid JSON" in malformed["error"]
     wrong_kind = json.loads(kt._handle_complete({"result": json.dumps({"kind": "execution_result"})}))
     assert "requires kind=review_decision" in wrong_kind["error"]
+    missing_field = json.loads(kt._handle_complete({"result": json.dumps({"kind": "review_decision", "verdict": "approve"})}))
+    assert "requires fields: decision" in missing_field["error"]
     accepted = json.loads(kt._handle_complete({
         "summary": "APPROVED",
         "result": json.dumps({"kind": "review_decision", "decision": "approve"}),
