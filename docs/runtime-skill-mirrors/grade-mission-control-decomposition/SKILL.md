@@ -67,11 +67,14 @@ Require all of the following:
 - Normal implementation work does not write proof files.
 - Read-only anchors do not overlap writable scope.
 - Each consumed token has exactly one provider and an explicit dependency on that provider.
-- Exactly one final `integration_proof` depends on every preceding execution slice and consumes all
-  preceding output tokens.
-- Exactly one final read-only gate review follows all execution work and consumes the integration
-  proof.
-- Full `software_build` belongs only to the final integration proof. Focused proof runs scoped tests.
+- For software delivery, exactly one final `integration_proof` depends on every preceding execution
+  slice, consumes all preceding output tokens, and exclusively owns `software_build`.
+- For `artifact_delivery`, accept content artifact classes, require declared output artifacts and
+  evidence tokens on every execution slice, and forbid software integration/build proof.
+- For `artifact_delivery`, the final operator gate depends on every execution slice and the named
+  `maeve_quality_review` slice is assigned to Maeve.
+- Exactly one final read-only gate review follows all execution work. Software review consumes the
+  integration proof; artifact review consumes the bounded content-quality evidence.
 - A gate review has no writable scope, no `apply_change` plan step, and no expected mutation.
 - Persistence, API, schema, migration, export, and composition ownership is truthful when present.
 - Trace trigger -> routing -> executor -> persistence -> proof. Every required invocation file has
@@ -129,6 +132,9 @@ Use these stable semantic codes:
 - `execution_released_before_approval`
 - `objective_review_state_invalid`
 - `invocation_chain_incomplete`
+- `artifact_delivery_software_proof_invalid`
+- `artifact_evidence_incomplete`
+- `artifact_quality_owner_invalid`
 
 ## Report
 

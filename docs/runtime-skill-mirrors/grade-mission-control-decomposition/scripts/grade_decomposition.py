@@ -23,7 +23,22 @@ PRIMARY_ARTIFACT_CLASSES = {
     "focused_proof",
     "integration_proof",
     "review_gate",
+    "research_evidence",
+    "content_draft",
+    "content_package",
 }
+
+ARTIFACT_DELIVERY_CLASSES = {"research_evidence", "content_draft", "content_package"}
+
+
+def delivery_profile(objective: dict[str, Any]) -> str:
+    decomposition_contract = objective.get("decompositionContract")
+    contract_profile = (
+        decomposition_contract.get("deliveryProfile")
+        if isinstance(decomposition_contract, dict)
+        else None
+    )
+    return str(objective.get("deliveryProfile") or contract_profile or "").strip().lower()
 
 
 def load_json(path: str) -> Any:
@@ -42,6 +57,10 @@ def contract(task: dict[str, Any]) -> dict[str, Any]:
 
 def canonical_actor(value: Any) -> str:
     return str(value or "").strip().lower()
+
+
+def canonical_label(value: Any) -> str:
+    return canonical_actor(value).replace("-", "_").replace(" ", "_")
 
 
 def inside(path: str, root: str) -> bool:
@@ -133,6 +152,7 @@ def main() -> int:
         finding(findings, "objective_review_state_invalid", f"Missing persisted children: {missing_children}")
 
     decomposition_contract = objective.get("decompositionContract")
+    artifact_delivery = delivery_profile(objective) == "artifact_delivery"
     mechanically_required_paths = strings(
         decomposition_contract.get("requiredOwnershipPaths")
         if isinstance(decomposition_contract, dict)
@@ -240,7 +260,15 @@ def main() -> int:
             finding(findings, "execution_plan_incomplete", f"Expected ordered plan {expected}; got {kinds}.", task)
 
         gates = strings((tc.get("verification") or {}).get("qualityGates"))
-        if "software_build" in gates and artifact_class != "integration_proof":
+        if artifact_delivery and ("software_build" in gates or artifact_class == "integration_proof"):
+            finding(
+                findings,
+                "artifact_delivery_software_proof_invalid",
+                "Artifact delivery cannot use software integration or build proof.",
+                task,
+                "taskContract.verification.qualityGates",
+            )
+        elif "software_build" in gates and artifact_class != "integration_proof":
             finding(
                 findings,
                 "quality_gate_build_ownership_invalid",
@@ -268,7 +296,40 @@ def main() -> int:
                 finding(findings, "evidence_dependency_missing", f"Token {token} provider is not a dependency.", task)
 
     integrations = [task for task in execution if contract(task).get("primaryArtifactClass") == "integration_proof"]
-    if len(integrations) != 1:
+    if artifact_delivery:
+        for task in execution:
+            tc = contract(task)
+            if not strings(tc.get("outputArtifacts")):
+                finding(findings, "artifact_evidence_incomplete", "Artifact execution must declare outputArtifacts.", task)
+            if not strings(tc.get("provides")):
+                finding(findings, "artifact_evidence_incomplete", "Artifact execution must provide evidence tokens.", task)
+
+        approved_slices = (
+            decomposition_contract.get("approvedSlices")
+            if isinstance(decomposition_contract, dict)
+            else []
+        )
+        maeve_slice_names = {
+            canonical_label(entry.get("name"))
+            for entry in approved_slices
+            if isinstance(entry, dict)
+            and canonical_label(entry.get("name")) == "maeve_quality_review"
+        }
+        maeve_quality = [
+            task
+            for task in execution
+            if canonical_label(task.get("sliceName") or task.get("approvedSlice")) in maeve_slice_names
+            or canonical_label(task.get("title")) == "maeve_quality_review"
+        ]
+        if len(maeve_quality) != 1 or canonical_actor(maeve_quality[0].get("assignee")) != "maeve":
+            finding(
+                findings,
+                "artifact_quality_owner_invalid",
+                "Artifact delivery requires exactly one Maeve-owned maeve_quality_review execution slice.",
+                maeve_quality[0] if len(maeve_quality) == 1 else None,
+                "assignee",
+            )
+    elif len(integrations) != 1:
         finding(findings, "integration_proof_incomplete", f"Expected one integration proof; found {len(integrations)}.")
     else:
         integration = integrations[0]
