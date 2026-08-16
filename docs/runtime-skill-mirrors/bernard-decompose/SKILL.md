@@ -116,6 +116,9 @@ Hard boundaries:
   a bounded content output and evidence token. Model quality review as an evidence-producing
   execution slice, then place one read-only operator `gate_review` last; that gate depends on every
   execution slice and authorizes `stored`, `scheduled`, or publishing intent from the objective.
+  Assign every `proofExpected` requirement to an existing approved slice through its requirements,
+  completion checks, output artifact, and provided evidence. Never add a proof-only slice or
+  `proofFiles` to satisfy artifact-delivery proof prose.
 - One final read-only `gate_review` depends on all required execution work and declares no writable or created-file scope.
 Start from `requiredOwnershipPaths`. Assign each requirement to its one actual writable owner.
 Do not hide existing ownership behind a parent `/**` glob.
