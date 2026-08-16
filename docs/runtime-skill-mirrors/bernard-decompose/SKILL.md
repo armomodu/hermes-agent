@@ -127,7 +127,7 @@ For `production_component` or `production_release`, give every `requiredProducti
 category an exact proof owner with
 `productionEvidence=[{"category":"...","evidenceToken":"..."}]`, the same token in `provides`, and
 an executable existing quality gate. The integration task provides `final_integration_proof`; assign
-the final gate to `productionGateReviewer` (normally Dolores); when it is `operator`, use lowercase `operator`, which is review-capable only for the read-only production gate. Never assign that gate to William or Bernard; execution slices stay with a worker/enricher and changing the assignee never bypasses a required root-bounded task split.
+the final gate to `productionGateReviewer` (normally Dolores); canonical actor identity is case-insensitive. Never assign that gate to William or Bernard. For `artifact_delivery` only, the declared `maeve_quality_review` execution slice is assigned to Maeve; every other execution slice stays with a worker/enricher, and changing an assignee never bypasses a required root-bounded task split.
 During semantic correction, the current objective's `productionGateReviewer` remains authoritative.
 Actor identity is case-insensitive, so `Operator` and `operator` are equivalent. Never replace an
 operator gate with Dolores because of stale compiler history or a finding that conflicts with the

@@ -82,6 +82,29 @@ TASK_TYPE_ALLOWED_ASSIGNEES = {
     "review": {"Bernard", "Maeve", "Dolores", "Abdul", "operator"},
 }
 
+
+def canonical_agent(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def canonical_slice_name(value: object) -> str:
+    return re.sub(r"[ -]+", "_", canonical_agent(value))
+
+
+def is_artifact_delivery_maeve_quality_task(task: dict, objective_contract: dict) -> bool:
+    quality_slice_declared = any(
+        isinstance(item, dict)
+        and canonical_slice_name(item.get("name")) == "maeve_quality_review"
+        for item in objective_contract.get("approvedSlices", [])
+    )
+    return (
+        objective_contract.get("deliveryProfile") == "artifact_delivery"
+        and quality_slice_declared
+        and canonical_slice_name(task.get("title")) == "maeve_quality_review"
+        and task.get("taskType") == "execution"
+        and canonical_agent(task.get("assignee")) == "maeve"
+    )
+
 AUTHORITY_IMPACT_ROLES = {
     "implementation",
     "export",
@@ -1135,9 +1158,13 @@ def collect_contract_required_findings(
         elif task_id:
             execution_ids.add(task_id)
         assignee = task.get("assignee")
+        artifact_quality_assignment = is_artifact_delivery_maeve_quality_task(task, objective_contract)
         if (
             task_type in TASK_TYPE_ALLOWED_ASSIGNEES
-            and assignee not in TASK_TYPE_ALLOWED_ASSIGNEES[task_type]
+            and canonical_agent(assignee) not in {
+                canonical_agent(allowed) for allowed in TASK_TYPE_ALLOWED_ASSIGNEES[task_type]
+            }
+            and not artifact_quality_assignment
         ):
             findings.append(
                 _graph_finding(
