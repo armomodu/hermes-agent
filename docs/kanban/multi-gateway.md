@@ -31,6 +31,10 @@ body. Those cards cannot complete from a prose summary alone. The worker must
 pass `result=` as a JSON object whose `kind` exactly matches the declaration.
 Hermes leaves summary-only completion unchanged for ordinary cards.
 
+Mission Control may also declare `MC Completion Required Fields: field_a,
+field_b`. Hermes then requires those top-level keys without interpreting their
+domain meaning; Mission Control remains the schema and workflow authority.
+
 This guard keeps structured completion evidence at the existing Kanban tool
 boundary. It prevents a successful worker handoff from becoming an invalid
 Mission Control projection without changing dispatch, retries, or card state.

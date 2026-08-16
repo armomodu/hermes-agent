@@ -775,6 +775,21 @@ def _handle_complete(args: dict, **kw) -> str:
                     return tool_error(
                         f"MC completion contract requires kind={expected_kind}; got {actual_kind!r}"
                     )
+                required_fields_match = re.search(
+                    r"(?mi)^\s*MC Completion Required Fields:\s*([a-z0-9_., -]+)\s*$",
+                    str(getattr(task, "body", "") or ""),
+                )
+                if required_fields_match:
+                    required_fields = [
+                        field.strip()
+                        for field in required_fields_match.group(1).split(",")
+                        if field.strip()
+                    ]
+                    missing_fields = [field for field in required_fields if field not in contract_result]
+                    if missing_fields:
+                        return tool_error(
+                            "MC completion contract requires fields: " + ", ".join(missing_fields)
+                        )
             rejection = _goal_mode_handoff_rejection(
                 task,
                 (summary or result or "").strip(),
