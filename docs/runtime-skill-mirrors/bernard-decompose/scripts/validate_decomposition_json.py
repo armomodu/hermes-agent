@@ -62,6 +62,9 @@ PRIMARY_ARTIFACT_CLASSES = {
     "focused_proof",
     "integration_proof",
     "review_gate",
+    "research_evidence",
+    "content_draft",
+    "content_package",
 }
 
 PRODUCTION_EVIDENCE_CATEGORIES = {
@@ -912,8 +915,14 @@ def collect_contract_required_findings(
         return [_graph_finding("payload_invalid", "objective_coverage", "payload must be an object")]
     if payload.get("kind") != "decomposition_result":
         findings.append(_graph_finding("kind_invalid", "objective_coverage", "kind must be decomposition_result"))
-    if payload.get("actor") != "Bernard":
-        findings.append(_graph_finding("actor_invalid", "objective_coverage", "actor must be Bernard"))
+    objective_owner = str(objective.get("owner") or "Bernard") if isinstance(objective, dict) else "Bernard"
+    allowed_actors = {objective_owner, "Dolores", "Bernard"}
+    if payload.get("actor") not in allowed_actors:
+        findings.append(_graph_finding(
+            "actor_invalid",
+            "objective_coverage",
+            f"actor must be one of {sorted(allowed_actors)}",
+        ))
     is_amendment = payload.get("operation") == "amend"
     if is_amendment:
         if payload.get("requestReview") is not False:
@@ -1062,6 +1071,13 @@ def collect_contract_required_findings(
         normalized_string_list(objective_contract.get("allowedExpansionZone"))
         + normalized_string_list(objective_contract.get("sourceAnchors"))
     )
+    artifact_delivery = (
+        objective_contract.get("deliveryProfile") == "artifact_delivery"
+        or (
+            isinstance(objective, dict)
+            and objective.get("deliveryProfile") == "artifact_delivery"
+        )
+    )
     documentation_surfaces = [
         surface
         for surface in normalized_string_list(objective_contract.get("touchedSurfaces"))
@@ -1150,6 +1166,48 @@ def collect_contract_required_findings(
                 allow_read_only=task_type == "review" and task.get("reviewMode") == "gate_review",
             )
         )
+        if artifact_delivery and task_type == "execution" and isinstance(contract, dict):
+            quality_gates = normalized_string_list(
+                contract.get("verification", {}).get("qualityGates")
+                if isinstance(contract.get("verification"), dict)
+                else []
+            )
+            for quality_gate in quality_gates:
+                findings.append(
+                    _graph_finding(
+                        "quality_gate_unsupported",
+                        "task",
+                        f"artifact_delivery does not run software quality gate {quality_gate} for {task_id}",
+                        task_id=task_id or None,
+                    )
+                )
+            if contract.get("primaryArtifactClass") == "integration_proof":
+                findings.append(
+                    _graph_finding(
+                        "primary_artifact_class_invalid",
+                        "task",
+                        f"artifact_delivery uses content evidence, not integration_proof, for {task_id}",
+                        task_id=task_id or None,
+                    )
+                )
+            if not normalized_string_list(contract.get("outputArtifacts")):
+                findings.append(
+                    _graph_finding(
+                        "output_artifact_missing",
+                        "task",
+                        f"artifact_delivery task must declare an output artifact for {task_id}",
+                        task_id=task_id or None,
+                    )
+                )
+            if not normalized_string_list(contract.get("provides")):
+                findings.append(
+                    _graph_finding(
+                        "evidence_provider_missing",
+                        "task",
+                        f"artifact_delivery task must provide phase-run evidence for {task_id}",
+                        task_id=task_id or None,
+                    )
+                )
         dependency_ids = normalized_string_list(task.get("dependsOn"))
         missing_dependencies = [dep for dep in dependency_ids if dep not in task_id_set]
         for dependency in missing_dependencies:
@@ -1453,7 +1511,16 @@ def collect_contract_required_findings(
         and isinstance(task.get("taskContract"), dict)
         and task["taskContract"].get("primaryArtifactClass") == "integration_proof"
     ]
-    if len(integration_tasks) != 1:
+    if artifact_delivery:
+        if integration_tasks:
+            findings.append(
+                _graph_finding(
+                    "integration_proof_count_invalid",
+                    "objective_coverage",
+                    "artifact_delivery must close through content evidence and review, not software integration_proof",
+                )
+            )
+    elif len(integration_tasks) != 1:
         findings.append(
             _graph_finding(
                 "integration_proof_count_invalid",
@@ -2171,8 +2238,9 @@ def main() -> int:
 
     if payload.get("kind") != "decomposition_result":
         return fail("kind must be decomposition_result")
-    if payload.get("actor") != "Bernard":
-        return fail("actor must be Bernard")
+    objective_owner = str(objective.get("owner") or "Bernard") if isinstance(objective, dict) else "Bernard"
+    if payload.get("actor") not in {objective_owner, "Dolores", "Bernard"}:
+        return fail(f"actor is not authorized for objective owner {objective_owner}")
     if payload.get("requestReview") is not True:
         return fail("requestReview must be true")
 

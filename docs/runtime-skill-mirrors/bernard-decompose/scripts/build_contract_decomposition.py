@@ -183,6 +183,12 @@ def initialize_manifest(objective: dict) -> dict:
                     "reviewMode": "gate_review",
                     "primaryArtifactClass": "review_gate",
                 },
+                "artifactDelivery": {
+                    "softwareQualityGates": [],
+                    "forbiddenArtifactClass": "integration_proof",
+                    "executionRequirement": "Each execution slice declares outputArtifacts and provides evidence.",
+                    "closure": "Evidence-producing quality execution followed by one read-only operator gate_review.",
+                },
             },
             "unassignedRequirements": [
                 *[
@@ -459,7 +465,7 @@ def expand_manifest(manifest: dict, objective: object | None = None) -> dict:
         "objectiveId": objective_id,
         "statusNote": require_text(manifest.get("statusNote"), "statusNote", "manifest"),
         "requestReview": True,
-        "actor": "Bernard",
+        "actor": str(objective.get("owner") or "Bernard"),
         "tasks": tasks,
     }
     amended_contract = build_amended_contract(manifest, objective)

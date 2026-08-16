@@ -87,6 +87,24 @@ class PlanPolicyTest(unittest.TestCase):
             manifest["contractGuide"]["unassignedRequirements"],
             ["ownership:src/workflow.ts", "proof:0"],
         )
+
+    def test_initializer_exposes_artifact_delivery_closure(self):
+        manifest = builder.initialize_manifest({
+            "id": "93c604b0-8cfb-4b09-a036-f658252a877e",
+            "owner": "Maeve",
+            "decompositionContract": {
+                "deliveryProfile": "artifact_delivery",
+                "requiredOwnershipPaths": [],
+                "proofExpected": [],
+            },
+        })
+        shape = manifest["contractGuide"]["specialTaskShapes"]["artifactDelivery"]
+        self.assertEqual(shape["softwareQualityGates"], [])
+        self.assertEqual(shape["forbiddenArtifactClass"], "integration_proof")
+        self.assertIn("operator gate_review", shape["closure"])
+        self.assertTrue({"research_evidence", "content_draft", "content_package"}.issubset(
+            validator.PRIMARY_ARTIFACT_CLASSES
+        ))
         self.assertEqual(
             manifest["contractGuide"]["specialTaskShapes"]["integrationProof"],
             {

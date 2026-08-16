@@ -7,10 +7,10 @@ description: |
   Mission Control remains the authoritative compiler and full-graph linter.
 trigger_conditions:
   - "Objective requires bounded decomposition"
-  - "Bernard is assigned a decompose or task-repair card"
+  - "An authorized decomposition owner is assigned a decompose or task-repair card"
 ---
 
-# Bernard Decomposition
+# Mission Control Decomposition
 ## Outcome
 Return one locally validated structured result:
 - `decomposition_result` for an objective decomposition; or
@@ -110,8 +110,12 @@ Hard boundaries:
 - Consume sibling outputs through tokens; never mass-reuse an unrelated generic authority or proof.
 - Generic proof tasks do not invent authority JSON. Only real authority extraction produces a named
   evidence artifact.
-- One final `integration_proof` depends on every preceding execution slice and consumes every token they provide.
-- Only the final `integration_proof` owns `software_build`; it must retain that gate.
+- Software delivery profiles use one final `integration_proof` that depends on every preceding
+  execution slice, consumes every token they provide, and solely owns `software_build`.
+- `artifact_delivery` never invents software proof or build work. Every execution slice declares
+  a bounded content output and evidence token. Model quality review as an evidence-producing
+  execution slice, then place one read-only operator `gate_review` last; that gate depends on every
+  execution slice and authorizes `stored`, `scheduled`, or publishing intent from the objective.
 - One final read-only `gate_review` depends on all required execution work and declares no writable or created-file scope.
 Start from `requiredOwnershipPaths`. Assign each requirement to its one actual writable owner.
 Do not hide existing ownership behind a parent `/**` glob.
